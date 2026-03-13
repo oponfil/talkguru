@@ -1,0 +1,6 @@
+[build]
+builder = "nixpacks"
+
+[deploy]
+# Перезапуск при любом падении (OOM, ошибки, зависание)
+restartPolicyType = "always"

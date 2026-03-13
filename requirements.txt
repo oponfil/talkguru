@@ -1,0 +1,14 @@
+# Telegram Bot
+python-telegram-bot>=20.0
+
+# HTTP клиент
+httpx>=0.24.0
+
+# Переменные окружения
+python-dotenv>=1.0.0
+
+# БД (Supabase)
+supabase>=2.0.0
+
+# x402gate.io (оплата USDC на Base/EVM)
+x402[evm]>=0.1.0

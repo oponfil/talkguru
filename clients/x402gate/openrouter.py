@@ -1,0 +1,118 @@
+# clients/x402gate/openrouter.py — Генерация текста через OpenRouter (via x402gate.io)
+#
+# Эндпоинт: POST /v1/openrouter/chat/completions
+# Формат: стандартный OpenAI Chat Completions API.
+
+import asyncio
+import time
+
+from clients.x402gate import x402gate_client, TopupError
+from config import (
+    CHAT_MODEL,
+    DEBUG_PRINT,
+    RETRY_ATTEMPTS,
+    RETRY_DELAY,
+    RETRY_EXPONENTIAL_BASE,
+)
+from prompts import SYSTEM_PROMPT
+from utils.utils import get_timestamp
+
+
+async def generate_response(
+    user_message: str,
+    model: str = CHAT_MODEL,
+    system_prompt: str | None = SYSTEM_PROMPT,
+    reasoning_effort: str = "medium",
+) -> str:
+    """Генерирует ответ на сообщение пользователя через OpenRouter.
+
+    Args:
+        user_message: Текст сообщения пользователя
+        model: Модель OpenRouter (по умолчанию CHAT_MODEL из config)
+        system_prompt: Системный промпт (None — без системного промпта)
+        reasoning_effort: Уровень reasoning (minimal/low/medium/high)
+
+    Returns:
+        Текстовый ответ модели
+
+    Raises:
+        ValueError: Если клиент x402gate не инициализирован
+        RuntimeError: При ошибках API
+    """
+    if not x402gate_client.available:
+        raise ValueError(
+            "EVM_PRIVATE_KEY is not set. "
+            "Please set it in .env to use x402gate.io for OpenRouter."
+        )
+
+    # Формируем messages в формате Chat Completions
+    messages = []
+    if system_prompt:
+        messages.append({"role": "system", "content": system_prompt})
+    messages.append({"role": "user", "content": user_message})
+
+    payload = {
+        "model": model,
+        "messages": messages,
+        "reasoning": {"effort": reasoning_effort},
+    }
+
+    api_path = "/v1/openrouter/chat/completions"
+    start_time = time.time()
+    last_error = None
+
+    # Retry с экспоненциальной задержкой
+    for attempt in range(RETRY_ATTEMPTS + 1):
+        try:
+            result = await x402gate_client.request(api_path, payload)
+
+            # x402gate оборачивает ответ в {"data": {...}}
+            if "data" in result and isinstance(result["data"], dict):
+                result = result["data"]
+
+            # Парсим Chat Completions ответ
+            if "choices" not in result or len(result["choices"]) == 0:
+                raise RuntimeError("OpenRouter API returned empty response (no choices)")
+
+            choice = result["choices"][0]
+            message_data = choice["message"]
+            text = message_data.get("content", "")
+
+            if not text or not text.strip():
+                raise RuntimeError("OpenRouter API returned empty response content")
+
+            # Логируем информацию о токенах
+            usage = result.get("usage", {}) or {}
+            input_tokens = usage.get("prompt_tokens", 0) or 0
+            output_tokens = usage.get("completion_tokens", 0) or 0
+            duration = time.time() - start_time
+
+            print(
+                f"{get_timestamp()} [OPENROUTER] {model} | "
+                f"{duration:.2f}s | tokens: {input_tokens} → {output_tokens}"
+            )
+
+            return text.strip()
+
+        except Exception as e:
+            last_error = e
+
+            # TopupError — ретрай бесполезен
+            if isinstance(e, TopupError):
+                print(f"{get_timestamp()} [OPENROUTER] Top-up failed — not retrying: {e}")
+                break
+
+            if attempt < RETRY_ATTEMPTS:
+                delay = RETRY_DELAY * (RETRY_EXPONENTIAL_BASE ** attempt)
+                if DEBUG_PRINT:
+                    print(f"[OPENROUTER] Error: {e}")
+                    print(f"[OPENROUTER] Retry {attempt + 1}/{RETRY_ATTEMPTS} after {delay:.1f}s...")
+                await asyncio.sleep(delay)
+                continue
+            else:
+                print(f"{get_timestamp()} [OPENROUTER] Failed after {RETRY_ATTEMPTS} retries: {e}")
+                break
+
+    if last_error:
+        raise last_error
+    raise RuntimeError("Unexpected error in generate_response")

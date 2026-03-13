@@ -1,0 +1,5 @@
+# Railway: Python provider
+providers = ["python"]
+
+[variables]
+NIXPACKS_PYTHON_VERSION = "3.13"
