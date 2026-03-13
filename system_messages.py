@@ -23,9 +23,16 @@ SYSTEM_MESSAGES = {
     "connect_already": "✅ Your account is already connected.",
     "disconnect_success": "🔌 Account disconnected. I'll no longer suggest replies.",
     "disconnect_not_connected": "ℹ️ Your account is not connected. Use /connect to connect.",
+    "connectqr_scan": "📱 Open Telegram on your phone → Settings → Devices → Link Desktop Device.\n\nScan this QR code with your phone camera. You have 2 minutes.",
+    "connectqr_timeout": "⏰ QR code expired. Please try /connectqr again.",
+    "connectqr_2fa_error": "🔐 Your account has 2FA enabled. QR login doesn't support 2FA yet. Please use /connect instead.",
+    "status_connected": "✅ Your account is connected. I'm suggesting replies to your incoming messages as drafts.",
+    "status_disconnected": "❌ Your account is not connected. Use /connect or /connectqr to connect.",
     "menu_start": "Start",
     "menu_connect": "Connect account",
+    "menu_connectqr": "Connect via QR code",
     "menu_disconnect": "Disconnect account",
+    "menu_status": "Connection status",
 }
 
 

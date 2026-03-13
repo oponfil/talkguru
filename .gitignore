@@ -38,3 +38,6 @@ Thumbs.db
 
 # Migrations (применяются вручную через Supabase SQL Editor)
 migrations/
+
+# Pyrogram / Telethon session files
+*.session

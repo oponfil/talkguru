@@ -20,7 +20,7 @@ from telegram.ext import (  # noqa: E402
 )
 
 from config import BOT_TOKEN, DEBUG_PRINT  # noqa: E402
-from utils.utils import get_timestamp  # noqa: E402
+from utils.utils import get_timestamp, typing_action  # noqa: E402
 from clients.x402gate.openrouter import generate_response  # noqa: E402
 from clients import pyrogram_client  # noqa: E402
 from database.users import upsert_user, update_last_msg_at, update_tg_rating  # noqa: E402
@@ -29,22 +29,20 @@ from system_messages import get_system_message, SYSTEM_MESSAGES  # noqa: E402
 from handlers.pyrogram_handlers import (  # noqa: E402
     CONNECT_PHONE, CONNECT_CODE, CONNECT_2FA,
     on_connect, on_connect_phone, on_connect_code, on_connect_2fa,
-    on_connect_cancel, on_disconnect,
+    on_connect_cancel, on_disconnect, on_connectqr, on_status,
     on_pyrogram_message, restore_sessions, update_menu_language,
 )
 
 
 # ====== ОБРАБОТЧИКИ СОБЫТИЙ ======
 
+@typing_action
 async def on_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Обработчик команды /start."""
     u = update.effective_user
 
     if DEBUG_PRINT:
         print(f"{get_timestamp()} [BOT] /start from user {u.id} (@{u.username})")
-
-    # Индикатор набора текста
-    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
 
     # Сохраняем пользователя в БД
     await upsert_user(
@@ -73,10 +71,10 @@ async def on_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update_menu_language(context.bot, u.language_code)
 
 
+@typing_action
 async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Обработчик текстовых сообщений — генерирует ответ через ИИ."""
     u = update.effective_user
-    c = update.effective_chat
     m = update.message
 
     message_text = m.text or ""
@@ -92,11 +90,8 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     # Обновляем last_msg_at
     await update_last_msg_at(u.id)
 
-    # Индикатор набора текста
-    await context.bot.send_chat_action(chat_id=c.id, action="typing")
-
     try:
-        # Генерируем ответ через OpenRouter (Gemini 3.1 Flash)
+        # Генерируем ответ через OpenRouter
         response_text = await generate_response(message_text)
 
         # Отправляем ответ
@@ -150,7 +145,9 @@ def main() -> None:
     # Регистрируем обработчики
     app.add_handler(CommandHandler("start", on_start))
     app.add_handler(connect_handler)
+    app.add_handler(CommandHandler("connectqr", on_connectqr))
     app.add_handler(CommandHandler("disconnect", on_disconnect))
+    app.add_handler(CommandHandler("status", on_status))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text))
 
     # Глобальный обработчик ошибок
@@ -168,7 +165,9 @@ async def post_init(app: Application) -> None:
     await app.bot.set_my_commands([
         BotCommand("start", "Start"),
         BotCommand("connect", "Connect account"),
+        BotCommand("connectqr", "Connect via QR code"),
         BotCommand("disconnect", "Disconnect account"),
+        BotCommand("status", "Connection status"),
     ])
 
     # Восстанавливаем Pyrogram-сессии
