@@ -141,7 +141,7 @@ async def _handle_draft_update(user_id: int, update: raw.types.UpdateDraftMessag
         return
 
     try:
-        # Извлекаем chat_id из peer
+        # Извлекаем chat_id из peer (личные, группы, каналы)
         peer = update.peer
         chat_id = getattr(peer, "user_id", None) or getattr(peer, "chat_id", None) or getattr(peer, "channel_id", None)
         if not chat_id:

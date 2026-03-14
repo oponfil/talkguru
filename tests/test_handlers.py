@@ -121,6 +121,7 @@ class TestOnPyrogramMessage:
         message.from_user.first_name = "Test"
         message.chat = MagicMock()
         message.chat.id = 456
+        message.chat.type = MagicMock(value="private")
 
         with patch("handlers.pyrogram_handlers.pyrogram_client") as mock_pc, \
              patch("handlers.pyrogram_handlers.generate_reply", new_callable=AsyncMock) as mock_gen, \

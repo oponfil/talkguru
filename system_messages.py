@@ -29,7 +29,7 @@ SYSTEM_MESSAGES = {
     "menu_connect": "Connect account",
     "menu_disconnect": "Disconnect account",
     "menu_status": "Connection status",
-    "draft_typing": "✍️ TalkGuru is typing...",
+    "draft_typing": "🦉 is typing...",
 }
 
 

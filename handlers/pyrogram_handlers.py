@@ -200,6 +200,10 @@ async def on_pyrogram_message(user_id: int, pyrogram_client_instance, message) -
     if message.from_user and message.from_user.is_bot:
         return
 
+    # Только личные чаты
+    if message.chat.type.value != "private":
+        return
+
     chat_id = message.chat.id
 
     if DEBUG_PRINT:
