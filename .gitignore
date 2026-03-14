@@ -41,3 +41,6 @@ migrations/
 
 # Pyrogram / Telethon session files
 *.session
+
+# TODO (личный роадмап)
+TODO/

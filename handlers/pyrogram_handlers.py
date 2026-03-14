@@ -16,13 +16,15 @@ from telegram.ext import (
 from config import (
     PYROGRAM_API_ID, PYROGRAM_API_HASH, DEBUG_PRINT,
     QR_LOGIN_TIMEOUT_SECONDS, QR_LOGIN_POLL_INTERVAL,
+    DRAFT_TRIGGER_SUFFIX,
 )
 from utils.utils import get_timestamp, typing_action
-from clients.x402gate.openrouter import generate_reply
+from clients.x402gate.openrouter import generate_reply, generate_response
 from clients import pyrogram_client
 from database import supabase
 from database.users import save_session, clear_session
 from system_messages import get_system_message, get_system_messages
+from prompts import DRAFT_INSTRUCTION_PROMPT
 
 
 # ====== СОСТОЯНИЯ CONVERSATION ======
@@ -388,6 +390,51 @@ async def on_pyrogram_message(user_id: int, pyrogram_client_instance, message) -
 
     except Exception as e:
         print(f"{get_timestamp()} [PYROGRAM] ERROR processing message for user {user_id}: {e}")
+
+
+async def on_pyrogram_draft(user_id: int, chat_id: int, draft_text: str) -> None:
+    """Вызывается при обновлении черновика — обрабатывает инструкции с суффиксом 🦉."""
+    # Проверяем триггер-суффикс
+    if not draft_text.endswith(DRAFT_TRIGGER_SUFFIX):
+        return
+
+    # Убираем суффикс → получаем инструкцию
+    instruction = draft_text[:-len(DRAFT_TRIGGER_SUFFIX)].strip()
+    if not instruction:
+        return
+
+    if DEBUG_PRINT:
+        print(f"{get_timestamp()} [DRAFT] Instruction from user {user_id} in chat {chat_id}: '{instruction[:80]}'")
+
+    try:
+        # Читаем историю чата для контекста
+        history = await pyrogram_client.read_chat_history(user_id, chat_id)
+
+        # Формируем запрос: инструкция + контекст переписки
+        context_lines = []
+        for msg in history:
+            prefix = "You" if msg["role"] == "user" else "Them"
+            context_lines.append(f"{prefix}: {msg['text']}")
+
+        user_message = f"Instruction: {instruction}"
+        if context_lines:
+            user_message += "\n\nChat history:\n" + "\n".join(context_lines)
+
+        # Генерируем ответ
+        response = await generate_response(
+            user_message=user_message,
+            system_prompt=DRAFT_INSTRUCTION_PROMPT,
+        )
+        if not response or not response.strip():
+            return
+
+        # Устанавливаем черновик (set_draft стрипает 🦉 автоматически)
+        await pyrogram_client.set_draft(user_id, chat_id, response.strip())
+
+        print(f"{get_timestamp()} [DRAFT] Response set as draft for user {user_id} in chat {chat_id}")
+
+    except Exception as e:
+        print(f"{get_timestamp()} [DRAFT] ERROR processing draft for user {user_id}: {e}")
 
 
 # ====== ВСПОМОГАТЕЛЬНЫЕ ======

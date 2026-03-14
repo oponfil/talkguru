@@ -49,3 +49,6 @@ MAX_CONTEXT_MESSAGES = 100  # Макс. кол-во сообщений из ча
 # ====== QR LOGIN ======
 QR_LOGIN_TIMEOUT_SECONDS = 120  # Таймаут ожидания сканирования QR-кода (секунды)
 QR_LOGIN_POLL_INTERVAL = 2  # Интервал проверки сканирования (секунды)
+
+# ====== DRAFT INTERACTION ======
+DRAFT_TRIGGER_SUFFIX = "🦉"  # Суффикс-триггер для активации AI через черновик

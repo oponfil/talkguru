@@ -30,7 +30,7 @@ from handlers.pyrogram_handlers import (  # noqa: E402
     CONNECT_PHONE, CONNECT_CODE, CONNECT_2FA,
     on_connect, on_connect_phone, on_connect_code, on_connect_2fa,
     on_connect_cancel, on_disconnect, on_connectqr, on_status,
-    on_pyrogram_message, restore_sessions, update_menu_language,
+    on_pyrogram_message, on_pyrogram_draft, restore_sessions, update_menu_language,
 )
 
 
@@ -125,8 +125,9 @@ def main() -> None:
 
     print(f"{get_timestamp()} [BOT] Starting TalkGuru bot...")
 
-    # Устанавливаем callback для Pyrogram
+    # Устанавливаем callback-и для Pyrogram
     pyrogram_client.set_message_callback(on_pyrogram_message)
+    pyrogram_client.set_draft_callback(on_pyrogram_draft)
 
     # Создаём приложение
     app = Application.builder().token(BOT_TOKEN).post_init(post_init).build()

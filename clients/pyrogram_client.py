@@ -1,9 +1,12 @@
 # clients/pyrogram_client.py — Управление Pyrogram-сессиями пользователей
 
 from pyrogram import Client, filters, raw
-from pyrogram.handlers import MessageHandler
+from pyrogram.handlers import MessageHandler, RawUpdateHandler
 
-from config import PYROGRAM_API_ID, PYROGRAM_API_HASH, MAX_CONTEXT_MESSAGES, DEBUG_PRINT
+from config import (
+    PYROGRAM_API_ID, PYROGRAM_API_HASH, MAX_CONTEXT_MESSAGES, DEBUG_PRINT,
+    DRAFT_TRIGGER_SUFFIX,
+)
 from utils.utils import get_timestamp
 
 
@@ -13,11 +16,20 @@ _active_clients: dict[int, Client] = {}
 # Callback для обработки входящих сообщений (устанавливается из bot.py)
 _on_new_message_callback = None
 
+# Callback для обработки черновиков (устанавливается из bot.py)
+_on_draft_callback = None
+
 
 def set_message_callback(callback) -> None:
     """Устанавливает callback для обработки входящих сообщений."""
     global _on_new_message_callback
     _on_new_message_callback = callback
+
+
+def set_draft_callback(callback) -> None:
+    """Устанавливает callback для обработки черновиков."""
+    global _on_draft_callback
+    _on_draft_callback = callback
 
 
 async def create_client(user_id: int, session_string: str) -> Client:
@@ -57,6 +69,13 @@ async def start_listening(user_id: int, session_string: str) -> bool:
         client.add_handler(
             MessageHandler(on_incoming, filters.private & filters.incoming)
         )
+
+        # Хендлер черновиков (raw update)
+        async def on_raw(client: Client, update, users, chats):
+            if isinstance(update, raw.types.UpdateDraftMessage):
+                await _handle_draft_update(user_id, update)
+
+        client.add_handler(RawUpdateHandler(on_raw))
 
         _active_clients[user_id] = client
         print(f"{get_timestamp()} [PYROGRAM] Started listening for user {user_id}")
@@ -119,6 +138,33 @@ async def read_chat_history(user_id: int, chat_id: int, limit: int = MAX_CONTEXT
     return messages
 
 
+async def _handle_draft_update(user_id: int, update: raw.types.UpdateDraftMessage) -> None:
+    """Обрабатывает raw UpdateDraftMessage — извлекает chat_id и текст, вызывает callback."""
+    if not _on_draft_callback:
+        return
+
+    try:
+        # Извлекаем chat_id из peer
+        peer = update.peer
+        chat_id = getattr(peer, "user_id", None) or getattr(peer, "chat_id", None) or getattr(peer, "channel_id", None)
+        if not chat_id:
+            return
+
+        # Извлекаем текст черновика
+        draft = update.draft
+        draft_text = getattr(draft, "message", None)
+        if not draft_text or not draft_text.strip():
+            return
+
+        if DEBUG_PRINT:
+            print(f"{get_timestamp()} [PYROGRAM] Draft update for user {user_id} in chat {chat_id}: '{draft_text[:50]}'")
+
+        await _on_draft_callback(user_id, chat_id, draft_text.strip())
+
+    except Exception as e:
+        print(f"{get_timestamp()} [PYROGRAM] ERROR handling draft update for user {user_id}: {e}")
+
+
 async def set_draft(user_id: int, chat_id: int, text: str) -> bool:
     """Устанавливает черновик (draft) в чате пользователя.
 
@@ -135,11 +181,14 @@ async def set_draft(user_id: int, chat_id: int, text: str) -> bool:
         return False
 
     try:
+        # Стрипаем триггер-суффикс, чтобы не зацикливать draft handler
+        clean_text = text.replace(DRAFT_TRIGGER_SUFFIX, "")
+
         peer = await client.resolve_peer(chat_id)
         await client.invoke(
             raw.functions.messages.SaveDraft(
                 peer=peer,
-                message=text,
+                message=clean_text,
             )
         )
 
