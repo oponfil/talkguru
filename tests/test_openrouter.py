@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from clients.x402gate import TopupError
+from clients.x402gate.openrouter import generate_response, generate_reply
 
 
 class TestGenerateResponse:
@@ -24,7 +25,6 @@ class TestGenerateResponse:
             mock_client.available = True
             mock_client.request = AsyncMock(return_value=mock_result)
 
-            from clients.x402gate.openrouter import generate_response
             result = await generate_response("Hi")
 
         assert result == "Hello, world!"
@@ -43,7 +43,6 @@ class TestGenerateResponse:
             mock_client.available = True
             mock_client.request = AsyncMock(return_value=mock_result)
 
-            from clients.x402gate.openrouter import generate_response
             with pytest.raises(RuntimeError, match="empty response"):
                 await generate_response("Hi")
 
@@ -57,7 +56,6 @@ class TestGenerateResponse:
             mock_client.available = True
             mock_client.request = AsyncMock(return_value=mock_result)
 
-            from clients.x402gate.openrouter import generate_response
             with pytest.raises(RuntimeError, match="empty response"):
                 await generate_response("Hi")
 
@@ -67,7 +65,6 @@ class TestGenerateResponse:
         with patch("clients.x402gate.openrouter.x402gate_client") as mock_client:
             mock_client.available = False
 
-            from clients.x402gate.openrouter import generate_response
             with pytest.raises(ValueError, match="EVM_PRIVATE_KEY"):
                 await generate_response("Hi")
 
@@ -78,7 +75,6 @@ class TestGenerateResponse:
             mock_client.available = True
             mock_client.request = AsyncMock(side_effect=TopupError("payment failed"))
 
-            from clients.x402gate.openrouter import generate_response
             with pytest.raises(TopupError):
                 await generate_response("Hi")
 
@@ -99,7 +95,6 @@ class TestGenerateResponse:
             mock_client.available = True
             mock_client.request = AsyncMock(return_value=mock_result)
 
-            from clients.x402gate.openrouter import generate_response
             result = await generate_response("Hi")
 
         assert result == "trimmed"
@@ -120,7 +115,6 @@ class TestGenerateReply:
         with patch("clients.x402gate.openrouter.generate_response", new_callable=AsyncMock) as mock_gen:
             mock_gen.return_value = "У меня тоже всё хорошо!"
 
-            from clients.x402gate.openrouter import generate_reply
             result = await generate_reply(history)
 
         assert result == "У меня тоже всё хорошо!"

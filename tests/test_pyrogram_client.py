@@ -1,6 +1,6 @@
 # tests/test_pyrogram_client.py — Тесты для clients/pyrogram_client.py
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -140,8 +140,8 @@ class TestHandleDraftUpdate:
         pyrogram_client._on_draft_callback = None
 
     @pytest.mark.asyncio
-    async def test_skips_empty_draft(self):
-        """Пустой текст черновика → пропускает."""
+    async def test_passes_empty_draft(self):
+        """Пустой текст черновика → передаёт пустую строку в callback."""
         callback = AsyncMock()
         pyrogram_client._on_draft_callback = callback
 
@@ -153,7 +153,7 @@ class TestHandleDraftUpdate:
 
         await pyrogram_client._handle_draft_update(123, update)
 
-        callback.assert_not_called()
+        callback.assert_called_once_with(123, 456, "")
 
         pyrogram_client._on_draft_callback = None
 

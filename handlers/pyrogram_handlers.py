@@ -10,189 +10,24 @@ from pyrogram import Client
 from pyrogram.raw.functions.auth import ExportLoginToken
 from telegram import BotCommand, Update
 from telegram.ext import (
-    Application, ConversationHandler, ContextTypes,
+    Application, ContextTypes,
 )
 
 from config import (
     PYROGRAM_API_ID, PYROGRAM_API_HASH, DEBUG_PRINT,
     QR_LOGIN_TIMEOUT_SECONDS, QR_LOGIN_POLL_INTERVAL,
-    DRAFT_TRIGGER_SUFFIX,
+    DRAFT_PROBE_DELAY,
 )
 from utils.utils import get_timestamp, typing_action
 from clients.x402gate.openrouter import generate_reply, generate_response
 from clients import pyrogram_client
 from database import supabase
 from database.users import save_session, clear_session
-from system_messages import get_system_message, get_system_messages
+from system_messages import get_system_message, get_system_messages, SYSTEM_MESSAGES
 from prompts import DRAFT_INSTRUCTION_PROMPT
 
 
-# ====== СОСТОЯНИЯ CONVERSATION ======
-CONNECT_PHONE, CONNECT_CODE, CONNECT_2FA = range(3)
 
-
-# ====== /connect ======
-
-@typing_action
-async def on_connect(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Обработчик команды /connect — начинает подключение аккаунта."""
-    u = update.effective_user
-
-    if DEBUG_PRINT:
-        print(f"{get_timestamp()} [BOT] /connect from user {u.id} (@{u.username})")
-
-    # Проверяем, не подключён ли уже
-    if pyrogram_client.is_active(u.id):
-        msg = await get_system_message(u.language_code, "connect_already")
-        await update.message.reply_text(msg)
-        return ConversationHandler.END
-
-    msg = await get_system_message(u.language_code, "connect_prompt_phone")
-    await update.message.reply_text(msg)
-    return CONNECT_PHONE
-
-
-@typing_action
-async def on_connect_phone(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Получает номер телефона, отправляет код."""
-    u = update.effective_user
-    phone = update.message.text.strip()
-
-    try:
-        client = Client(
-            name=f"talkguru_{u.id}",
-            api_id=PYROGRAM_API_ID,
-            api_hash=PYROGRAM_API_HASH,
-            phone_number=phone,
-            in_memory=True,
-        )
-        await client.connect()
-        try:
-            # Сначала пытаемся стандартно (APP)
-            sent_code = await client.send_code(phone)
-            # Принудительно запрашиваем SMS, если это возможно
-            if sent_code.next_type:
-                sent_code = await client.resend_code(phone, sent_code.phone_code_hash)
-        except Exception as e:
-            msg_str = str(e).lower()
-            if "flood" in msg_str:
-                print(f"{get_timestamp()} [BOT] FloodWait in send_code: {e}")
-                raise
-            else:
-                raise
-
-        if DEBUG_PRINT:
-            print(f"{get_timestamp()} [CONNECT] Phone: {phone}, type: {sent_code.type}, next_type: {sent_code.next_type}")
-
-        # Сохраняем в контекст для следующего шага
-        context.user_data["pyrogram_client"] = client
-        context.user_data["phone"] = phone
-        context.user_data["phone_code_hash"] = sent_code.phone_code_hash
-
-        msg = await get_system_message(u.language_code, "connect_prompt_code")
-        await update.message.reply_text(msg)
-        return CONNECT_CODE
-
-    except Exception as e:
-        print(f"{get_timestamp()} [BOT] ERROR connect phone for user {u.id}: {e}")
-        msg = await get_system_message(u.language_code, "connect_error")
-        await update.message.reply_text(msg)
-        return ConversationHandler.END
-
-
-async def on_connect_code(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Получает код подтверждения, авторизует пользователя."""
-    u = update.effective_user
-    code = update.message.text.strip()
-
-    client = context.user_data.get("pyrogram_client")
-    phone = context.user_data.get("phone")
-    phone_code_hash = context.user_data.get("phone_code_hash")
-
-    if not client or not phone:
-        msg = await get_system_message(u.language_code, "connect_error")
-        await update.message.reply_text(msg)
-        return ConversationHandler.END
-
-    try:
-        await client.sign_in(phone, phone_code_hash, code)
-    except Exception as e:
-        error_name = type(e).__name__
-        # Нужна 2FA
-        if "password" in error_name.lower() or "two" in str(e).lower():
-            msg = await get_system_message(u.language_code, "connect_prompt_2fa")
-            await update.message.reply_text(msg)
-            return CONNECT_2FA
-
-        print(f"{get_timestamp()} [BOT] ERROR connect code for user {u.id}: {e}")
-        await client.disconnect()
-        msg = await get_system_message(u.language_code, "connect_error")
-        await update.message.reply_text(msg)
-        return ConversationHandler.END
-
-    return await _finalize_connection(update, context, client)
-
-
-async def on_connect_2fa(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Получает пароль 2FA."""
-    u = update.effective_user
-    password = update.message.text.strip()
-    client = context.user_data.get("pyrogram_client")
-
-    if not client:
-        msg = await get_system_message(u.language_code, "connect_error")
-        await update.message.reply_text(msg)
-        return ConversationHandler.END
-
-    try:
-        await client.check_password(password)
-    except Exception as e:
-        print(f"{get_timestamp()} [BOT] ERROR connect 2FA for user {u.id}: {e}")
-        await client.disconnect()
-        msg = await get_system_message(u.language_code, "connect_error")
-        await update.message.reply_text(msg)
-        return ConversationHandler.END
-
-    return await _finalize_connection(update, context, client)
-
-
-async def _finalize_connection(update: Update, context: ContextTypes.DEFAULT_TYPE, client) -> int:
-    """Завершает подключение: сохраняет сессию, запускает слушатель."""
-    u = update.effective_user
-
-    try:
-        session_string = await client.export_session_string()
-        await client.disconnect()
-
-        # Сохраняем в БД
-        await save_session(u.id, session_string)
-
-        # Запускаем слушатель
-        await pyrogram_client.start_listening(u.id, session_string)
-
-        msg = await get_system_message(u.language_code, "connect_success")
-        await update.message.reply_text(msg)
-        print(f"{get_timestamp()} [BOT] User {u.id} connected via Pyrogram")
-
-    except Exception as e:
-        print(f"{get_timestamp()} [BOT] ERROR finalizing connection for user {u.id}: {e}")
-        msg = await get_system_message(u.language_code, "connect_error")
-        await update.message.reply_text(msg)
-
-    # Очищаем контекст
-    context.user_data.pop("pyrogram_client", None)
-    context.user_data.pop("phone", None)
-    context.user_data.pop("phone_code_hash", None)
-    return ConversationHandler.END
-
-
-async def on_connect_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Отмена /connect."""
-    context.user_data.pop("pyrogram_client", None)
-    context.user_data.pop("phone", None)
-    context.user_data.pop("phone_code_hash", None)
-    await update.message.reply_text("❌ Cancelled.")
-    return ConversationHandler.END
 
 
 # ====== /disconnect ======
@@ -236,15 +71,15 @@ async def on_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(msg)
 
 
-# ====== /connectqr ======
+# ====== /connect ======
 
 @typing_action
-async def on_connectqr(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Обработчик команды /connectqr — подключение аккаунта через QR-код."""
+async def on_connect(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Обработчик команды /connect — подключение аккаунта через QR-код."""
     u = update.effective_user
 
     if DEBUG_PRINT:
-        print(f"{get_timestamp()} [BOT] /connectqr from user {u.id} (@{u.username})")
+        print(f"{get_timestamp()} [BOT] /connect from user {u.id} (@{u.username})")
 
     # Проверяем, не подключён ли уже
     if pyrogram_client.is_active(u.id):
@@ -283,7 +118,7 @@ async def on_connectqr(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         buf.seek(0)
 
         # Отправляем QR-код пользователю
-        msg = await get_system_message(u.language_code, "connectqr_scan")
+        msg = await get_system_message(u.language_code, "connect_scan")
         await update.message.reply_photo(photo=buf, caption=msg)
 
         if DEBUG_PRINT:
@@ -295,7 +130,7 @@ async def on_connectqr(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         )
 
     except Exception as e:
-        print(f"{get_timestamp()} [BOT] ERROR connectqr for user {u.id}: {e}")
+        print(f"{get_timestamp()} [BOT] ERROR connect for user {u.id}: {e}")
         traceback.print_exc()
         msg = await get_system_message(u.language_code, "connect_error")
         await update.message.reply_text(msg)
@@ -323,7 +158,7 @@ async def _poll_qr_login(client, user_id: int, language_code: str, bot, chat_id:
             except Exception as e:
                 type_name = type(e).__name__
                 if "SessionPasswordNeeded" in type_name:
-                    msg = await get_system_message(language_code, "connectqr_2fa_error")
+                    msg = await get_system_message(language_code, "connect_2fa_error")
                     await bot.send_message(chat_id=chat_id, text=msg)
                     await client.disconnect()
                     return
@@ -331,7 +166,7 @@ async def _poll_qr_login(client, user_id: int, language_code: str, bot, chat_id:
                     raise
 
         if not authorized:
-            msg = await get_system_message(language_code, "connectqr_timeout")
+            msg = await get_system_message(language_code, "connect_timeout")
             await bot.send_message(chat_id=chat_id, text=msg)
             await client.disconnect()
             return
@@ -392,19 +227,55 @@ async def on_pyrogram_message(user_id: int, pyrogram_client_instance, message) -
         print(f"{get_timestamp()} [PYROGRAM] ERROR processing message for user {user_id}: {e}")
 
 
+# Тексты черновиков, установленные ботом: {(user_id, chat_id): text}
+_bot_drafts: dict[tuple[int, int], str] = {}
+
+# Ожидающие проверки черновики пользователя: {(user_id, chat_id): instruction}
+_pending_drafts: dict[tuple[int, int], str] = {}
+
+
 async def on_pyrogram_draft(user_id: int, chat_id: int, draft_text: str) -> None:
-    """Вызывается при обновлении черновика — обрабатывает инструкции с суффиксом 🦉."""
-    # Проверяем триггер-суффикс
-    if not draft_text.endswith(DRAFT_TRIGGER_SUFFIX):
+    """Вызывается при обновлении черновика — probe-based detection."""
+    key = (user_id, chat_id)
+
+    # Игнорируем черновики, установленные ботом (пробел или AI-ответ)
+    bot_text = _bot_drafts.get(key)
+    if bot_text is not None and draft_text == bot_text:
+        _bot_drafts.pop(key, None)  # Одноразовая проверка
         return
 
-    # Убираем суффикс → получаем инструкцию
-    instruction = draft_text[:-len(DRAFT_TRIGGER_SUFFIX)].strip()
-    if not instruction:
+    # Пустой черновик — ничего не делаем
+    if not draft_text:
+        _pending_drafts.pop(key, None)
         return
+
+    # Пользователь набрал текст — запоминаем как инструкцию
+    instruction = draft_text
 
     if DEBUG_PRINT:
-        print(f"{get_timestamp()} [DRAFT] Instruction from user {user_id} in chat {chat_id}: '{instruction[:80]}'")
+        print(f"{get_timestamp()} [DRAFT] User text for {user_id} in chat {chat_id}: '{instruction[:80]}'")
+
+    # Сохраняем инструкцию и ставим пробу (статус-сообщение)
+    probe_text = SYSTEM_MESSAGES["draft_typing"]
+    _pending_drafts[key] = instruction
+    _bot_drafts[key] = probe_text
+    await pyrogram_client.set_draft(user_id, chat_id, probe_text)
+
+    # Ждём DRAFT_PROBE_DELAY секунд
+    await asyncio.sleep(DRAFT_PROBE_DELAY)
+
+    # Проверяем: инструкция ещё ожидает? (если пользователь вернул свой текст —
+    # on_pyrogram_draft вызовется снова и перезапишет _pending_drafts → новый цикл)
+    current_pending = _pending_drafts.get(key)
+    if current_pending != instruction:
+        # Инструкция изменилась или удалена — кто-то другой уже обрабатывает
+        return
+
+    # Пользователь вышел из чата — генерируем ответ
+    _pending_drafts.pop(key, None)
+
+    if DEBUG_PRINT:
+        print(f"{get_timestamp()} [DRAFT] User left chat, processing: '{instruction[:80]}'")
 
     try:
         # Читаем историю чата для контекста
@@ -428,8 +299,10 @@ async def on_pyrogram_draft(user_id: int, chat_id: int, draft_text: str) -> None
         if not response or not response.strip():
             return
 
-        # Устанавливаем черновик (set_draft стрипает 🦉 автоматически)
-        await pyrogram_client.set_draft(user_id, chat_id, response.strip())
+        # Устанавливаем черновик с AI-ответом и запоминаем
+        ai_text = response.strip()
+        _bot_drafts[key] = ai_text
+        await pyrogram_client.set_draft(user_id, chat_id, ai_text)
 
         print(f"{get_timestamp()} [DRAFT] Response set as draft for user {user_id} in chat {chat_id}")
 
@@ -477,7 +350,6 @@ async def update_menu_language(bot, language_code: str | None) -> None:
             [
                 BotCommand("start", messages.get("menu_start", "Start")),
                 BotCommand("connect", messages.get("menu_connect", "Connect account")),
-                BotCommand("connectqr", messages.get("menu_connectqr", "Connect via QR code")),
                 BotCommand("disconnect", messages.get("menu_disconnect", "Disconnect account")),
                 BotCommand("status", messages.get("menu_status", "Connection status")),
             ],

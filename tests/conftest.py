@@ -1,7 +1,6 @@
 # tests/conftest.py — Общие фикстуры для тестов TalkGuru
 
 import os
-import sys
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest

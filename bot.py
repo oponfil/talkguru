@@ -16,7 +16,7 @@ logging.getLogger("telegram").setLevel(logging.ERROR)
 from telegram import BotCommand, Update  # noqa: E402
 from telegram.ext import (  # noqa: E402
     Application, MessageHandler, CommandHandler,
-    ConversationHandler, ContextTypes, filters,
+    ContextTypes, filters,
 )
 
 from config import BOT_TOKEN, DEBUG_PRINT  # noqa: E402
@@ -27,9 +27,7 @@ from database.users import upsert_user, update_last_msg_at, update_tg_rating  # 
 from utils.telegram_rating import extract_rating_from_chat  # noqa: E402
 from system_messages import get_system_message, SYSTEM_MESSAGES  # noqa: E402
 from handlers.pyrogram_handlers import (  # noqa: E402
-    CONNECT_PHONE, CONNECT_CODE, CONNECT_2FA,
-    on_connect, on_connect_phone, on_connect_code, on_connect_2fa,
-    on_connect_cancel, on_disconnect, on_connectqr, on_status,
+    on_disconnect, on_connect, on_status,
     on_pyrogram_message, on_pyrogram_draft, restore_sessions, update_menu_language,
 )
 
@@ -132,21 +130,9 @@ def main() -> None:
     # Создаём приложение
     app = Application.builder().token(BOT_TOKEN).post_init(post_init).build()
 
-    # ConversationHandler для /connect
-    connect_handler = ConversationHandler(
-        entry_points=[CommandHandler("connect", on_connect)],
-        states={
-            CONNECT_PHONE: [MessageHandler(filters.TEXT & ~filters.COMMAND, on_connect_phone)],
-            CONNECT_CODE: [MessageHandler(filters.TEXT & ~filters.COMMAND, on_connect_code)],
-            CONNECT_2FA: [MessageHandler(filters.TEXT & ~filters.COMMAND, on_connect_2fa)],
-        },
-        fallbacks=[CommandHandler("cancel", on_connect_cancel)],
-    )
-
     # Регистрируем обработчики
     app.add_handler(CommandHandler("start", on_start))
-    app.add_handler(connect_handler)
-    app.add_handler(CommandHandler("connectqr", on_connectqr))
+    app.add_handler(CommandHandler("connect", on_connect))
     app.add_handler(CommandHandler("disconnect", on_disconnect))
     app.add_handler(CommandHandler("status", on_status))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text))
@@ -166,7 +152,6 @@ async def post_init(app: Application) -> None:
     await app.bot.set_my_commands([
         BotCommand("start", "Start"),
         BotCommand("connect", "Connect account"),
-        BotCommand("connectqr", "Connect via QR code"),
         BotCommand("disconnect", "Disconnect account"),
         BotCommand("status", "Connection status"),
     ])

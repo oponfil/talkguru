@@ -3,10 +3,7 @@
 from pyrogram import Client, filters, raw
 from pyrogram.handlers import MessageHandler, RawUpdateHandler
 
-from config import (
-    PYROGRAM_API_ID, PYROGRAM_API_HASH, MAX_CONTEXT_MESSAGES, DEBUG_PRINT,
-    DRAFT_TRIGGER_SUFFIX,
-)
+from config import PYROGRAM_API_ID, PYROGRAM_API_HASH, MAX_CONTEXT_MESSAGES, DEBUG_PRINT
 from utils.utils import get_timestamp
 
 
@@ -150,11 +147,9 @@ async def _handle_draft_update(user_id: int, update: raw.types.UpdateDraftMessag
         if not chat_id:
             return
 
-        # Извлекаем текст черновика
+        # Извлекаем текст черновика (может быть пустым при очистке)
         draft = update.draft
-        draft_text = getattr(draft, "message", None)
-        if not draft_text or not draft_text.strip():
-            return
+        draft_text = getattr(draft, "message", "") or ""
 
         if DEBUG_PRINT:
             print(f"{get_timestamp()} [PYROGRAM] Draft update for user {user_id} in chat {chat_id}: '{draft_text[:50]}'")
@@ -181,14 +176,11 @@ async def set_draft(user_id: int, chat_id: int, text: str) -> bool:
         return False
 
     try:
-        # Стрипаем триггер-суффикс, чтобы не зацикливать draft handler
-        clean_text = text.replace(DRAFT_TRIGGER_SUFFIX, "")
-
         peer = await client.resolve_peer(chat_id)
         await client.invoke(
             raw.functions.messages.SaveDraft(
                 peer=peer,
-                message=clean_text,
+                message=text,
             )
         )
 

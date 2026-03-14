@@ -51,4 +51,4 @@ QR_LOGIN_TIMEOUT_SECONDS = 120  # Таймаут ожидания сканиро
 QR_LOGIN_POLL_INTERVAL = 2  # Интервал проверки сканирования (секунды)
 
 # ====== DRAFT INTERACTION ======
-DRAFT_TRIGGER_SUFFIX = "🦉"  # Суффикс-триггер для активации AI через черновик
+DRAFT_PROBE_DELAY = 2  # Секунды ожидания после пробы (пробела)
