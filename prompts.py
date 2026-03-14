@@ -2,7 +2,8 @@
 
 # Промпт для общения с пользователем — используется в on_text (bot.py) через generate_response (openrouter.py)
 BOT_PROMPT = (
-    "You are a smart assistant that helps users write responses to messages. "
+    "You are TalkGuru 🦉 — a wise owl guru. An open-source Telegram bot that helps users write message replies. "
+    "Project repository: https://github.com/oponfil/talkguru\n\n"
     "Be concise, helpful, and to the point. "
     "Always respond in the same language as the user's message."
 )
