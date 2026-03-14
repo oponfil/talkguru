@@ -19,7 +19,7 @@ from telegram.ext import (  # noqa: E402
     ContextTypes, filters,
 )
 
-from config import BOT_TOKEN, DEBUG_PRINT  # noqa: E402
+from config import BOT_TOKEN, DEBUG_PRINT, BOT_READ_TIMEOUT  # noqa: E402
 from utils.utils import get_timestamp, typing_action  # noqa: E402
 from clients.x402gate.openrouter import generate_response  # noqa: E402
 from clients import pyrogram_client  # noqa: E402
@@ -128,7 +128,7 @@ def main() -> None:
     pyrogram_client.set_draft_callback(on_pyrogram_draft)
 
     # Создаём приложение
-    app = Application.builder().token(BOT_TOKEN).post_init(post_init).build()
+    app = Application.builder().token(BOT_TOKEN).read_timeout(BOT_READ_TIMEOUT).post_init(post_init).build()
 
     # Регистрируем обработчики
     app.add_handler(CommandHandler("start", on_start))

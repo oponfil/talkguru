@@ -121,7 +121,15 @@ async def read_chat_history(user_id: int, chat_id: int, limit: int = MAX_CONTEXT
                 continue
 
             role = "user" if msg.from_user and msg.from_user.id == user_id else "other"
-            messages.append({"role": role, "text": msg.text})
+            sender = msg.from_user
+            messages.append({
+                "role": role,
+                "text": msg.text,
+                "date": msg.date,
+                "name": sender.first_name if sender else None,
+                "last_name": sender.last_name if sender else None,
+                "username": sender.username if sender else None,
+            })
 
         # Переворачиваем — от старых к новым
         messages.reverse()

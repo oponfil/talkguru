@@ -7,7 +7,9 @@ import traceback
 
 import qrcode
 from pyrogram import Client
-from pyrogram.raw.functions.auth import ExportLoginToken
+from pyrogram.raw.functions.auth import ExportLoginToken, ImportLoginToken
+from pyrogram.session import Session as PyroSession
+from pyrogram.session.auth import Auth
 from telegram import BotCommand, Update
 from telegram.ext import (
     Application, ContextTypes,
@@ -18,7 +20,7 @@ from config import (
     QR_LOGIN_TIMEOUT_SECONDS, QR_LOGIN_POLL_INTERVAL,
     DRAFT_PROBE_DELAY,
 )
-from utils.utils import get_timestamp, typing_action
+from utils.utils import get_timestamp, typing_action, format_chat_history
 from clients.x402gate.openrouter import generate_reply, generate_response
 from clients import pyrogram_client
 from database import supabase
@@ -38,7 +40,7 @@ async def on_disconnect(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         print(f"{get_timestamp()} [BOT] /disconnect from user {u.id} (@{u.username})")
 
     if not pyrogram_client.is_active(u.id):
-        msg = await get_system_message(u.language_code, "disconnect_not_connected")
+        msg = await get_system_message(u.language_code, "status_disconnected")
         await update.message.reply_text(msg)
         return
 
@@ -149,9 +151,47 @@ async def _poll_qr_login(client, user_id: int, language_code: str, bot, chat_id:
                     )
                 )
                 type_name = type(result).__name__
+                if DEBUG_PRINT:
+                    print(f"{get_timestamp()} [CONNECT_QR] Poll result for user {user_id}: {type_name}")
                 if "Success" in type_name:
                     authorized = True
                     break
+                if "MigrateTo" in type_name:
+                    # Аккаунт на другом DC — переключаемся и импортируем токен
+                    dc_id = result.dc_id
+                    token = result.token
+                    print(f"{get_timestamp()} [CONNECT_QR] Migrating user {user_id} to DC {dc_id}")
+                    try:
+                        # Переключаем сессию на правильный DC (паттерн из Pyrogram)
+                        await client.session.stop()
+                        await client.storage.dc_id(dc_id)
+                        await client.storage.auth_key(
+                            await Auth(client, dc_id, await client.storage.test_mode()).create()
+                        )
+                        client.session = PyroSession(
+                            client,
+                            dc_id,
+                            await client.storage.auth_key(),
+                            await client.storage.test_mode(),
+                        )
+                        await client.session.start()
+
+                        migration_result = await client.invoke(
+                            ImportLoginToken(token=token),
+                        )
+                        migration_type = type(migration_result).__name__
+                        print(f"{get_timestamp()} [CONNECT_QR] Migration result for user {user_id}: {migration_type}")
+                        if "Success" in migration_type or "Authorization" in migration_type:
+                            # Сохраняем данные авторизации в storage
+                            auth = getattr(migration_result, "authorization", migration_result)
+                            user_obj = getattr(auth, "user", None)
+                            if user_obj:
+                                await client.storage.user_id(user_obj.id)
+                                await client.storage.is_bot(getattr(user_obj, "bot", False))
+                            authorized = True
+                            break
+                    except Exception as migrate_err:
+                        print(f"{get_timestamp()} [CONNECT_QR] Migration error for user {user_id}: {migrate_err}")
             except Exception as e:
                 type_name = type(e).__name__
                 if "SessionPasswordNeeded" in type_name:
@@ -159,7 +199,10 @@ async def _poll_qr_login(client, user_id: int, language_code: str, bot, chat_id:
                     await bot.send_message(chat_id=chat_id, text=msg)
                     await client.disconnect()
                     return
-                if "Unauthorized" not in str(e):
+                if "Unauthorized" in str(e):
+                    if DEBUG_PRINT:
+                        print(f"{get_timestamp()} [CONNECT_QR] Waiting for scan (user {user_id}): {e}")
+                else:
                     raise
 
         if not authorized:
@@ -223,8 +266,18 @@ async def on_pyrogram_message(user_id: int, pyrogram_client_instance, message) -
         if not history:
             return
 
+        # Информация об участниках для контекста AI
+        opponent = message.from_user
+        opponent_info = {
+            "first_name": opponent.first_name,
+            "last_name": opponent.last_name,
+            "username": opponent.username,
+            "language_code": opponent.language_code,
+            "is_premium": opponent.is_premium,
+        } if opponent else None
+
         # Генерируем ответ
-        reply_text = await generate_reply(history)
+        reply_text = await generate_reply(history, user, opponent_info)
         if not reply_text or not reply_text.strip():
             return
 
@@ -294,14 +347,23 @@ async def on_pyrogram_draft(user_id: int, chat_id: int, draft_text: str) -> None
         history = await pyrogram_client.read_chat_history(user_id, chat_id)
 
         # Формируем запрос: инструкция + контекст переписки
-        context_lines = []
-        for msg in history:
-            prefix = "You" if msg["role"] == "user" else "Them"
-            context_lines.append(f"{prefix}: {msg['text']}")
 
-        user_message = f"Instruction: {instruction}"
-        if context_lines:
-            user_message += "\n\nChat history:\n" + "\n".join(context_lines)
+        # Определяем профиль оппонента из истории
+        opponent_info = None
+        for msg in history:
+            if msg["role"] == "other" and msg.get("name"):
+                opponent_info = {
+                    "first_name": msg.get("name"),
+                    "last_name": msg.get("last_name"),
+                    "username": msg.get("username"),
+                }
+                break
+
+        user_message = ""
+        if history:
+            user_message = format_chat_history(history, user, opponent_info)
+            user_message += "\n\n"
+        user_message += f"INSTRUCTION: {instruction}"
 
         # Генерируем ответ
         response = await generate_response(

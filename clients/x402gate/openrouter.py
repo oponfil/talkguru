@@ -4,18 +4,47 @@
 # Формат: стандартный OpenAI Chat Completions API.
 
 import asyncio
+import json
+import os
 import time
+from datetime import datetime
 
 from clients.x402gate import x402gate_client, TopupError
 from config import (
     LLM_MODEL,
     DEBUG_PRINT,
+    LOG_TO_FILE,
     RETRY_ATTEMPTS,
     RETRY_DELAY,
     RETRY_EXPONENTIAL_BASE,
 )
 from prompts import BOT_PROMPT, REPLY_SYSTEM_PROMPT
-from utils.utils import get_timestamp
+from utils.utils import get_timestamp, format_chat_history
+
+LOG_DIR = "logs"
+
+
+def _log_to_file(payload: dict, response_text: str, model: str, duration: float, usage: dict) -> None:
+    """Записывает полный запрос и ответ в отдельный лог-файл."""
+    if not LOG_TO_FILE:
+        return
+
+    os.makedirs(LOG_DIR, exist_ok=True)
+
+    entry = {
+        "timestamp": get_timestamp(),
+        "model": model,
+        "duration_s": round(duration, 2),
+        "usage": usage,
+        "request": payload["messages"],
+        "response": response_text,
+    }
+
+    filename = datetime.now().strftime("%Y-%m-%d_%H-%M-%S") + "_openrouter.log"
+    filepath = os.path.join(LOG_DIR, filename)
+
+    with open(filepath, "w", encoding="utf-8") as f:
+        f.write(json.dumps(entry, ensure_ascii=False, indent=2) + "\n")
 
 
 async def generate_response(
@@ -92,6 +121,8 @@ async def generate_response(
                 f"{duration:.2f}s | tokens: {input_tokens} → {output_tokens}"
             )
 
+            _log_to_file(payload, text.strip(), model, duration, usage)
+
             return text.strip()
 
         except Exception as e:
@@ -105,8 +136,8 @@ async def generate_response(
             if attempt < RETRY_ATTEMPTS:
                 delay = RETRY_DELAY * (RETRY_EXPONENTIAL_BASE ** attempt)
                 if DEBUG_PRINT:
-                    print(f"[OPENROUTER] Error: {e}")
-                    print(f"[OPENROUTER] Retry {attempt + 1}/{RETRY_ATTEMPTS} after {delay:.1f}s...")
+                    print(f"{get_timestamp()} [OPENROUTER] Error: {e}")
+                    print(f"{get_timestamp()} [OPENROUTER] Retry {attempt + 1}/{RETRY_ATTEMPTS} after {delay:.1f}s...")
                 await asyncio.sleep(delay)
                 continue
             else:
@@ -117,23 +148,22 @@ async def generate_response(
         raise last_error
     raise RuntimeError("Unexpected error in generate_response")
 
-
-async def generate_reply(chat_history: list[dict]) -> str:
+async def generate_reply(
+    chat_history: list[dict],
+    user_info: dict | None = None,
+    opponent_info: dict | None = None,
+) -> str:
     """Генерирует ответ на основе контекста переписки.
 
     Args:
-        chat_history: Список сообщений [{role: "user"/"other", text: "..."}]
+        chat_history: Список сообщений [{role, text, date?, name?}]
+        user_info: Полная информация о пользователе (из БД)
+        opponent_info: Информация об оппоненте (из Pyrogram)
 
     Returns:
         Текст ответа от лица пользователя
     """
-    # Форматируем историю в текст для AI
-    formatted = []
-    for msg in chat_history:
-        prefix = "You" if msg["role"] == "user" else "Them"
-        formatted.append(f"{prefix}: {msg['text']}")
-
-    history_text = "\n".join(formatted)
+    history_text = format_chat_history(chat_history, user_info, opponent_info)
 
     return await generate_response(
         user_message=history_text,

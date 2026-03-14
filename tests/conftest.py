@@ -13,6 +13,7 @@ os.environ.setdefault("SUPABASE_URL", "https://test.supabase.co")
 os.environ.setdefault("SUPABASE_KEY", "test-supabase-key")
 os.environ.setdefault("EVM_PRIVATE_KEY", "0x0000000000000000000000000000000000000000000000000000000000000001")
 os.environ.setdefault("DEBUG_PRINT", "false")
+os.environ["LOG_TO_FILE"] = "false"  # Не создавать лог-файлы в тестах
 
 
 # ====== Мок Supabase до импорта database ======

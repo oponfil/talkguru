@@ -18,6 +18,7 @@ if not PYROGRAM_API_ID or not PYROGRAM_API_HASH:
 
 # ====== ОТЛАДКА ======
 DEBUG_PRINT = os.getenv("DEBUG_PRINT", "False").lower() in ("true", "1", "yes")
+LOG_TO_FILE = os.getenv("LOG_TO_FILE", "False").lower() in ("true", "1", "yes")
 
 # ====== БАЗА ДАННЫХ (Supabase) ======
 SUPABASE_URL = os.getenv("SUPABASE_URL", "")
@@ -51,4 +52,7 @@ QR_LOGIN_TIMEOUT_SECONDS = 120  # Таймаут ожидания сканиро
 QR_LOGIN_POLL_INTERVAL = 2  # Интервал проверки сканирования (секунды)
 
 # ====== DRAFT INTERACTION ======
-DRAFT_PROBE_DELAY = 2  # Секунды ожидания после пробы (пробела)
+DRAFT_PROBE_DELAY = 2  # Секунды ожидания после пробы (draft_typing)
+
+# ====== TELEGRAM BOT ======
+BOT_READ_TIMEOUT = 30  # Таймаут чтения ответа от Telegram API (секунды)
