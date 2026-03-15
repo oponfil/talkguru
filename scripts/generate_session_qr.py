@@ -1,6 +1,7 @@
 import asyncio
 import os
 import sys
+
 import qrcode
 from telethon import TelegramClient
 
@@ -17,29 +18,29 @@ if sys.stdout.encoding.lower() != 'utf-8':
 
 async def main():
     print("=== Telethon QR Code Login ===")
-    
+
     if not PYROGRAM_API_ID or not PYROGRAM_API_HASH:
         print("❌ PYROGRAM_API_ID и PYROGRAM_API_HASH не заданы в .env!")
         return
 
     # Telethon client
     client = TelegramClient('anon_telethon', PYROGRAM_API_ID, PYROGRAM_API_HASH)
-    await client.connect()
-
-    qr = await client.qr_login()
-    print("Откройте Telegram на телефоне -> Настройки -> Устройства -> Привязать устройство")
-    print("Отсканируйте этот QR-код:\n")
-    
-    qr_obj = qrcode.QRCode()
-    qr_obj.add_data(qr.url)
-    qr_obj.print_ascii()
-    
-    print("\n⏳ Ожидание сканирования... (у вас есть примерно 30-60 секунд)")
-    
     try:
+        await client.connect()
+
+        qr = await client.qr_login()
+        print("Откройте Telegram на телефоне -> Настройки -> Устройства -> Привязать устройство")
+        print("Отсканируйте этот QR-код:\n")
+
+        qr_obj = qrcode.QRCode()
+        qr_obj.add_data(qr.url)
+        qr_obj.print_ascii()
+
+        print("\n⏳ Ожидание сканирования... (у вас есть примерно 30-60 секунд)")
+
         await qr.wait(timeout=60)
         print("\n✅ QR-код отсканирован, выгружаем сессию для Pyrogram...")
-        
+
         import struct
         import base64
         from pyrogram.storage.storage import Storage
@@ -61,23 +62,34 @@ async def main():
             False    # is_bot
         )
         session_string = base64.urlsafe_b64encode(packed).decode().rstrip("=")
-        
-        await client.disconnect()
 
-        # Удаляем временную сессию Telethon
-        if os.path.exists("anon_telethon.session"):
-            os.remove("anon_telethon.session")
-            
         print("\n" + "="*50)
         print("АВТОРИЗАЦИЯ УСПЕШНА!")
         print("="*50 + "\n")
-        print("📍 Ваш SESSION_STRING:\n")
-        print(session_string)
+
+        print("SESSION_STRING является bearer credential.")
+        print("Не храните его в shell history, логах терминала, чатах или открытых заметках.")
+
+        reveal = input("Показать SESSION_STRING в терминале? Введите YES: ").strip()
+        if reveal == "YES":
+            print("\n📍 Ваш SESSION_STRING:\n")
+            print(session_string)
+        else:
+            print("\nSESSION_STRING скрыт. Запустите скрипт снова, если захотите вывести его в терминал.")
+
         print("\nИспользуйте эту строку только через код приложения.")
         print("Не вставляйте SESSION_STRING напрямую в Supabase в открытом виде.")
-        
+
     except Exception as e:
         print(f"\n❌ Ошибка или истекло время: {e}")
+    finally:
+        try:
+            await client.disconnect()
+        except Exception:
+            pass
+
+        if os.path.exists("anon_telethon.session"):
+            os.remove("anon_telethon.session")
 
 if __name__ == "__main__":
     asyncio.run(main())

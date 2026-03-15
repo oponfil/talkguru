@@ -16,6 +16,7 @@ async def restore_sessions(app: Application) -> None:
             return
 
         count = 0
+        failed_user_ids = []
         for row in rows:
             user_id = row["user_id"]
             session_string = row["session_string"]
@@ -23,9 +24,16 @@ async def restore_sessions(app: Application) -> None:
                 ok = await pyrogram_client.start_listening(user_id, session_string)
                 if ok:
                     count += 1
+                else:
+                    failed_user_ids.append(user_id)
 
         if count > 0:
             print(f"{get_timestamp()} [BOT] Restored {count} Pyrogram session(s)")
+        if failed_user_ids:
+            print(
+                f"{get_timestamp()} [BOT] WARNING: Failed to restore sessions for users: "
+                f"{failed_user_ids}"
+            )
 
     except Exception as e:
         print(f"{get_timestamp()} [BOT] ERROR restoring sessions: {e}")

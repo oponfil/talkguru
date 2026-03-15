@@ -60,10 +60,10 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
     if DEBUG_PRINT:
-        try:
-            print(f"{get_timestamp()} [BOT] Text from user {u.id}: '{message_text[:100]}'")
-        except UnicodeEncodeError:
-            print(f"{get_timestamp()} [BOT] Text from user {u.id}: [unicode text]")
+        print(
+            f"{get_timestamp()} [BOT] Text from user {u.id}: "
+            f"{len(message_text)} chars"
+        )
 
     # Обновляем last_msg_at
     await update_last_msg_at(u.id)

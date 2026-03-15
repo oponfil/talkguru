@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from clients.x402gate import X402GateClient, TopupError
+from clients.x402gate import NonRetriableRequestError, TopupError, X402GateClient
 
 
 class TestX402GateClientInit:
@@ -135,6 +135,56 @@ class TestRequest:
 
             with pytest.raises(RuntimeError, match="500"):
                 await client.request("/v1/test", {})
+
+    @pytest.mark.asyncio
+    async def test_non_retriable_4xx_raises_specific_error(self):
+        client = X402GateClient(private_key="0x0000000000000000000000000000000000000000000000000000000000000001")
+        client._prepaid_balance = 1.0
+
+        mock_response = MagicMock()
+        mock_response.status_code = 422
+        mock_response.text = "Validation failed"
+
+        with patch("httpx.AsyncClient") as MockHTTP:
+            mock_http = AsyncMock()
+            MockHTTP.return_value.__aenter__ = AsyncMock(return_value=mock_http)
+            MockHTTP.return_value.__aexit__ = AsyncMock(return_value=False)
+            mock_http.post = AsyncMock(return_value=mock_response)
+
+            with pytest.raises(NonRetriableRequestError, match="422"):
+                await client.request("/v1/test", {})
+
+
+class TestTopup:
+    @pytest.mark.asyncio
+    async def test_reconciles_balance_after_ambiguous_payment_failure(self):
+        client = X402GateClient(private_key="0x0000000000000000000000000000000000000000000000000000000000000001")
+        client._prepaid_balance = 1.0
+
+        payment_required_response = MagicMock()
+        payment_required_response.status_code = 402
+        payment_required_response.json.return_value = {
+            "accepts": [{"network": "eip155:8453"}]
+        }
+
+        mock_http = AsyncMock()
+        mock_http.post = AsyncMock(side_effect=[payment_required_response, RuntimeError("network timeout")])
+
+        mock_payment_payload = MagicMock()
+        mock_payment_payload.model_dump_json.return_value = "{}"
+
+        with patch("httpx.AsyncClient") as MockHTTP, \
+             patch("clients.x402gate.PaymentRequired.model_validate", return_value=MagicMock()), \
+             patch.object(client, "get_balance", new_callable=AsyncMock, return_value=1.5) as mock_get_balance, \
+             patch.object(client._x402_client, "create_payment_payload", new_callable=AsyncMock, return_value=mock_payment_payload):
+            MockHTTP.return_value.__aenter__ = AsyncMock(return_value=mock_http)
+            MockHTTP.return_value.__aexit__ = AsyncMock(return_value=False)
+
+            balance = await client.topup(0.5)
+
+        assert balance == 1.5
+        assert client._topup_generation == 1
+        mock_get_balance.assert_called_once()
 
 
 class TestTopupError:

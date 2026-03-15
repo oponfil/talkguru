@@ -83,15 +83,20 @@ async def start_listening(user_id: int, session_string: str) -> bool:
         return False
 
 
-async def stop_listening(user_id: int) -> None:
+async def stop_listening(user_id: int) -> bool:
     """Останавливает Pyrogram-клиент пользователя."""
-    client = _active_clients.pop(user_id, None)
-    if client:
-        try:
-            await client.stop()
-            print(f"{get_timestamp()} [PYROGRAM] Stopped listening for user {user_id}")
-        except Exception as e:
-            print(f"{get_timestamp()} [PYROGRAM] ERROR stopping client for user {user_id}: {e}")
+    client = _active_clients.get(user_id)
+    if not client:
+        return True
+
+    try:
+        await client.stop()
+        _active_clients.pop(user_id, None)
+        print(f"{get_timestamp()} [PYROGRAM] Stopped listening for user {user_id}")
+        return True
+    except Exception as e:
+        print(f"{get_timestamp()} [PYROGRAM] ERROR stopping client for user {user_id}: {e}")
+        return False
 
 
 def is_active(user_id: int) -> bool:
@@ -160,7 +165,10 @@ async def _handle_draft_update(user_id: int, update: raw.types.UpdateDraftMessag
         draft_text = getattr(draft, "message", "") or ""
 
         if DEBUG_PRINT:
-            print(f"{get_timestamp()} [PYROGRAM] Draft update for user {user_id} in chat {chat_id}: '{draft_text[:50]}'")
+            print(
+                f"{get_timestamp()} [PYROGRAM] Draft update for user {user_id} "
+                f"in chat {chat_id}: {len(draft_text)} chars"
+            )
 
         await _on_draft_callback(user_id, chat_id, draft_text.strip())
 

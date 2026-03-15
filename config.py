@@ -35,7 +35,7 @@ if not SESSION_ENCRYPTION_KEY:
 
 # ====== x402gate.io (оплата USDC на Base) ======
 X402GATE_URL = "https://x402gate.io"
-X402GATE_TIMEOUT = 300  # Таймаут запроса (секунды)
+X402GATE_TIMEOUT = 120  # Таймаут запроса (секунды)
 X402GATE_PREPAID_TOPUP_AMOUNT = 0.5  # Сумма пополнения prepaid ($)
 X402GATE_PREPAID_MIN_BALANCE = 0.10  # Минимальный порог баланса ($)
 EVM_PRIVATE_KEY = os.getenv("EVM_PRIVATE_KEY", "")
@@ -47,9 +47,13 @@ DEFAULT_LANGUAGE_CODE = "en"  # Язык по умолчанию (ISO 639-1)
 LLM_MODEL = "google/gemini-3.1-flash-lite-preview"  # Модель ИИ через OpenRouter
 
 # ====== RETRY ======
-RETRY_ATTEMPTS = 3  # Количество повторных попыток
+RETRY_ATTEMPTS = 2  # Количество повторных попыток
 RETRY_DELAY = 2.0  # Базовая задержка (секунды)
 RETRY_EXPONENTIAL_BASE = 2.0  # База экспоненциальной задержки
+
+# ====== ЛОКАЛИЗАЦИЯ ======
+SYSTEM_MESSAGE_TRANSLATION_TIMEOUT = 60
+SYSTEM_MESSAGES_FALLBACK_TTL_SECONDS = 300.0
 
 # ====== КОНТЕКСТ ======
 MAX_CONTEXT_MESSAGES = 100  # Макс. кол-во сообщений из чата для контекста

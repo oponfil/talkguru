@@ -54,8 +54,16 @@ async def main():
     ) as app:
         session_string = await app.export_session_string()
         print("\n✅ Авторизация успешна!")
-        print(f"\nВаш SESSION_STRING:\n\n{session_string}\n")
-        print("Скопируйте эту строку и используйте её только через код приложения.")
+        print("SESSION_STRING является bearer credential.")
+        print("Не храните его в shell history, логах терминала, чатах или открытых заметках.")
+
+        reveal = input("\nПоказать SESSION_STRING в терминале? Введите YES: ").strip()
+        if reveal == "YES":
+            print(f"\nВаш SESSION_STRING:\n\n{session_string}\n")
+        else:
+            print("\nSESSION_STRING скрыт. Запустите скрипт снова, если захотите вывести его в терминал.")
+
+        print("Используйте эту строку только через код приложения.")
         print("Не сохраняйте SESSION_STRING напрямую в базу данных в открытом виде.")
 
 

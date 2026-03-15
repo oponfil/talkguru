@@ -9,6 +9,7 @@ from database.users import (
     get_session,
     get_user,
     get_users_with_sessions,
+    has_saved_session,
     save_session,
     update_last_msg_at,
     update_tg_rating,
@@ -94,7 +95,9 @@ class TestUpdateLastMsgAt:
 
             await update_last_msg_at(123)
 
-        mock_table.update.assert_called_once_with({"last_msg_at": "now()"})
+        call_args = mock_table.update.call_args[0][0]
+        assert "last_msg_at" in call_args
+        assert call_args["last_msg_at"].endswith("+00:00")
         mock_table.eq.assert_called_once_with("user_id", 123)
 
     @pytest.mark.asyncio
@@ -137,14 +140,24 @@ class TestSaveSession:
         with patch("database.users.supabase") as mock_sb:
             mock_sb.table.return_value = mock_table
 
-            await save_session(123, "session-string-value")
+            result = await save_session(123, "session-string-value")
 
+        assert result is True
         call_args = mock_table.upsert.call_args
         data = call_args[0][0]
         assert data["user_id"] == 123
         assert data["session_string"] != "session-string-value"
         assert decrypt_session_string(data["session_string"]) == "session-string-value"
         assert call_args[1] == {"on_conflict": "user_id"}
+
+    @pytest.mark.asyncio
+    async def test_returns_false_on_error(self):
+        with patch("database.users.supabase") as mock_sb:
+            mock_sb.table.side_effect = Exception("DB error")
+
+            result = await save_session(123, "session-string-value")
+
+        assert result is False
 
 
 class TestGetSession:
@@ -191,10 +204,44 @@ class TestClearSession:
         with patch("database.users.supabase") as mock_sb:
             mock_sb.table.return_value = mock_table
 
-            await clear_session(123)
+            result = await clear_session(123)
 
+        assert result is True
         mock_table.update.assert_called_once_with({"session_string": None})
         mock_table.eq.assert_called_once_with("user_id", 123)
+
+    @pytest.mark.asyncio
+    async def test_returns_false_on_error(self):
+        with patch("database.users.supabase") as mock_sb:
+            mock_sb.table.side_effect = Exception("DB error")
+
+            result = await clear_session(123)
+
+        assert result is False
+
+
+class TestHasSavedSession:
+    @pytest.mark.asyncio
+    async def test_returns_true_when_session_present(self):
+        mock_table = _make_mock_table()
+        mock_table.execute.return_value = MagicMock(data=[{"session_string": "encrypted"}])
+        with patch("database.users.supabase") as mock_sb:
+            mock_sb.table.return_value = mock_table
+
+            result = await has_saved_session(123)
+
+        assert result is True
+
+    @pytest.mark.asyncio
+    async def test_returns_false_when_session_absent(self):
+        mock_table = _make_mock_table()
+        mock_table.execute.return_value = MagicMock(data=[{"session_string": None}])
+        with patch("database.users.supabase") as mock_sb:
+            mock_sb.table.return_value = mock_table
+
+            result = await has_saved_session(123)
+
+        assert result is False
 
 
 class TestGetUsersWithSessions:

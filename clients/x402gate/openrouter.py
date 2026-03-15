@@ -9,7 +9,7 @@ import os
 import time
 from datetime import datetime
 
-from clients.x402gate import x402gate_client, TopupError
+from clients.x402gate import NonRetriableRequestError, TopupError, x402gate_client
 from config import (
     LLM_MODEL,
     DEBUG_PRINT,
@@ -24,7 +24,9 @@ from utils.utils import get_timestamp, format_chat_history
 LOG_DIR = "logs"
 
 
-def _log_to_file(payload: dict, response_text: str, model: str, duration: float, usage: dict) -> None:
+def _log_to_file(
+    payload: dict, response_text: str, model: str, duration: float, usage: dict, reasoning_text: str = "",
+) -> None:
     """Записывает полный запрос и ответ в отдельный лог-файл."""
     if not LOG_TO_FILE:
         return
@@ -39,6 +41,8 @@ def _log_to_file(payload: dict, response_text: str, model: str, duration: float,
         "request": payload["messages"],
         "response": response_text,
     }
+    if reasoning_text:
+        entry["reasoning"] = reasoning_text
 
     filename = datetime.now().strftime("%Y-%m-%d_%H-%M-%S") + "_openrouter.log"
     filepath = os.path.join(LOG_DIR, filename)
@@ -110,18 +114,26 @@ async def generate_response(
             if not text or not text.strip():
                 raise RuntimeError("OpenRouter API returned empty response content")
 
+            # Reasoning content (если модель поддерживает)
+            reasoning_text = message_data.get("reasoning_content") or message_data.get("reasoning") or ""
+
             # Логируем информацию о токенах
             usage = result.get("usage", {}) or {}
             input_tokens = usage.get("prompt_tokens", 0) or 0
             output_tokens = usage.get("completion_tokens", 0) or 0
+            reasoning_tokens = usage.get("reasoning_tokens", 0) or 0
             duration = time.time() - start_time
+
+            token_info = f"tokens: {input_tokens} → {output_tokens}"
+            if reasoning_tokens:
+                token_info += f" (reasoning: {reasoning_tokens})"
 
             print(
                 f"{get_timestamp()} [OPENROUTER] {model} | "
-                f"{duration:.2f}s | tokens: {input_tokens} → {output_tokens}"
+                f"{duration:.2f}s | {token_info}"
             )
 
-            _log_to_file(payload, text.strip(), model, duration, usage)
+            _log_to_file(payload, text.strip(), model, duration, usage, reasoning_text)
 
             return text.strip()
 
@@ -129,8 +141,12 @@ async def generate_response(
             last_error = e
 
             # TopupError — ретрай бесполезен
-            if isinstance(e, TopupError):
-                print(f"{get_timestamp()} [OPENROUTER] Top-up failed — not retrying: {e}")
+            if isinstance(e, (TopupError, NonRetriableRequestError, ValueError)):
+                print(f"{get_timestamp()} [OPENROUTER] Non-retriable error: {e}")
+                break
+
+            if isinstance(e, RuntimeError) and "empty response" in str(e).lower():
+                print(f"{get_timestamp()} [OPENROUTER] Invalid model response — not retrying: {e}")
                 break
 
             if attempt < RETRY_ATTEMPTS:

@@ -42,25 +42,31 @@ class TestStopListening:
         mock_client = AsyncMock()
         pyrogram_client._active_clients[100] = mock_client
 
-        await pyrogram_client.stop_listening(100)
+        result = await pyrogram_client.stop_listening(100)
 
+        assert result is True
         mock_client.stop.assert_called_once()
         assert 100 not in pyrogram_client._active_clients
 
     @pytest.mark.asyncio
     async def test_no_error_for_missing_user(self):
         """Не падает если пользователь не найден."""
-        await pyrogram_client.stop_listening(99999)
+        result = await pyrogram_client.stop_listening(99999)
+        assert result is True
 
     @pytest.mark.asyncio
     async def test_handles_stop_exception(self):
-        """Не падает если client.stop() бросает исключение."""
+        """При ошибке stop() клиент остаётся под контролем."""
         mock_client = AsyncMock()
         mock_client.stop.side_effect = Exception("disconnect error")
         pyrogram_client._active_clients[200] = mock_client
 
-        await pyrogram_client.stop_listening(200)
-        assert 200 not in pyrogram_client._active_clients
+        result = await pyrogram_client.stop_listening(200)
+
+        assert result is False
+        assert pyrogram_client._active_clients[200] is mock_client
+
+        del pyrogram_client._active_clients[200]
 
 
 class TestReadChatHistory:

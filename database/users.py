@@ -1,5 +1,6 @@
 # database/users.py — CRUD для таблицы users
 
+from datetime import datetime, timezone
 from typing import Optional
 
 from config import DEBUG_PRINT
@@ -49,9 +50,10 @@ async def upsert_user(
 async def update_last_msg_at(user_id: int) -> None:
     """Обновляет время последнего сообщения пользователя."""
     try:
+        now_iso = datetime.now(timezone.utc).isoformat()
         await run_supabase(
             lambda: supabase.table("users").update(
-                {"last_msg_at": "now()"}
+                {"last_msg_at": now_iso}
             ).eq("user_id", user_id).execute()
         )
     except Exception as e:
@@ -70,7 +72,7 @@ async def update_tg_rating(user_id: int, rating: Optional[int]) -> None:
         print(f"{get_timestamp()} [DB] ERROR update_tg_rating {user_id}: {e}")
 
 
-async def save_session(user_id: int, session_string: str) -> None:
+async def save_session(user_id: int, session_string: str) -> bool:
     """Сохраняет Pyrogram session string пользователя."""
     try:
         encrypted_session = encrypt_session_string(session_string)
@@ -83,8 +85,10 @@ async def save_session(user_id: int, session_string: str) -> None:
 
         if DEBUG_PRINT:
             print(f"{get_timestamp()} [DB] Session saved for user {user_id}")
+        return True
     except Exception as e:
         print(f"{get_timestamp()} [DB] ERROR save_session {user_id}: {e}")
+        return False
 
 
 async def get_session(user_id: int) -> Optional[str]:
@@ -131,7 +135,7 @@ async def get_users_with_sessions() -> list[dict]:
         return []
 
 
-async def clear_session(user_id: int) -> None:
+async def clear_session(user_id: int) -> bool:
     """Очищает Pyrogram session string пользователя."""
     try:
         await run_supabase(
@@ -142,8 +146,26 @@ async def clear_session(user_id: int) -> None:
 
         if DEBUG_PRINT:
             print(f"{get_timestamp()} [DB] Session cleared for user {user_id}")
+        return True
     except Exception as e:
         print(f"{get_timestamp()} [DB] ERROR clear_session {user_id}: {e}")
+        return False
+
+
+async def has_saved_session(user_id: int) -> bool:
+    """Проверяет, есть ли у пользователя сохраненная сессия в БД."""
+    try:
+        result = await run_supabase(
+            lambda: supabase.table("users").select(
+                "session_string"
+            ).eq("user_id", user_id).execute()
+        )
+        if not result.data:
+            return False
+        return bool(result.data[0].get("session_string"))
+    except Exception as e:
+        print(f"{get_timestamp()} [DB] ERROR has_saved_session {user_id}: {e}")
+        return False
 
 
 async def get_user(user_id: int) -> Optional[dict]:

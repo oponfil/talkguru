@@ -32,17 +32,30 @@ from prompts import build_draft_prompt
 async def on_disconnect(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Обработчик команды /disconnect — отключает аккаунт."""
     u = update.effective_user
+    is_active = pyrogram_client.is_active(u.id)
 
     if DEBUG_PRINT:
         print(f"{get_timestamp()} [BOT] /disconnect from user {u.id} (@{u.username})")
 
-    if not pyrogram_client.is_active(u.id):
-        msg = await get_system_message(u.language_code, "status_disconnected")
+    if is_active:
+        stopped = await pyrogram_client.stop_listening(u.id)
+        if not stopped:
+            msg = await get_system_message(u.language_code, "disconnect_error")
+            await update.message.reply_text(msg)
+            return
+
+    # Всегда пробуем очистить сессию в БД:
+    # это делает /disconnect идемпотентным и устраняет stale-сессии после сбоев.
+    cleared = await clear_session(u.id)
+    if not cleared:
+        msg = await get_system_message(u.language_code, "disconnect_error")
         await update.message.reply_text(msg)
         return
 
-    await pyrogram_client.stop_listening(u.id)
-    await clear_session(u.id)
+    if not is_active:
+        msg = await get_system_message(u.language_code, "status_disconnected")
+        await update.message.reply_text(msg)
+        return
 
     msg = await get_system_message(u.language_code, "disconnect_success")
     await update.message.reply_text(msg)
@@ -69,18 +82,43 @@ async def on_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 # ====== /connect ======
 
-_qr_login_tasks: set[asyncio.Task] = set()
+_qr_login_tasks: dict[int, asyncio.Task] = {}
 
 
-def _register_qr_login_task(task: asyncio.Task) -> None:
+def _get_qr_login_task(user_id: int) -> asyncio.Task | None:
+    """Возвращает активную QR-задачу пользователя."""
+    task = _qr_login_tasks.get(user_id)
+    if task and task.done():
+        _qr_login_tasks.pop(user_id, None)
+        return None
+    return task
+
+
+def _register_qr_login_task(user_id: int, task: asyncio.Task) -> None:
     """Регистрирует фоновую QR-задачу до её завершения."""
-    _qr_login_tasks.add(task)
-    task.add_done_callback(_qr_login_tasks.discard)
+    _qr_login_tasks[user_id] = task
+
+    def _cleanup(done_task: asyncio.Task) -> None:
+        current_task = _qr_login_tasks.get(user_id)
+        if current_task is done_task:
+            _qr_login_tasks.pop(user_id, None)
+
+    task.add_done_callback(_cleanup)
+
+
+async def _safe_disconnect_temp_client(client: Client, user_id: int) -> None:
+    """Пытается корректно отключить временный QR-клиент."""
+    try:
+        await client.disconnect()
+    except Exception as e:
+        if DEBUG_PRINT:
+            print(f"{get_timestamp()} [CONNECT_QR] Cleanup disconnect failed for user {user_id}: {e}")
 
 @typing_action
 async def on_connect(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Обработчик команды /connect — подключение аккаунта через QR-код."""
     u = update.effective_user
+    client: Client | None = None
 
     if DEBUG_PRINT:
         print(f"{get_timestamp()} [BOT] /connect from user {u.id} (@{u.username})")
@@ -88,6 +126,11 @@ async def on_connect(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     # Проверяем, не подключён ли уже
     if pyrogram_client.is_active(u.id):
         msg = await get_system_message(u.language_code, "connect_already")
+        await update.message.reply_text(msg)
+        return
+
+    if _get_qr_login_task(u.id) is not None:
+        msg = await get_system_message(u.language_code, "connect_in_progress")
         await update.message.reply_text(msg)
         return
 
@@ -149,13 +192,16 @@ async def on_connect(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                 update.effective_chat.id,
             )
         )
-        _register_qr_login_task(task)
+        _register_qr_login_task(u.id, task)
+        client = None
 
     except Exception as e:
         print(f"{get_timestamp()} [BOT] ERROR connect for user {u.id}: {e}")
         traceback.print_exc()
         msg = await get_system_message(u.language_code, "connect_error")
         await update.message.reply_text(msg)
+        if client is not None:
+            await _safe_disconnect_temp_client(client, u.id)
 
 
 async def _poll_qr_login(client, user_id: int, language_code: str, bot, chat_id: int) -> None:
@@ -220,7 +266,6 @@ async def _poll_qr_login(client, user_id: int, language_code: str, bot, chat_id:
                 if "SessionPasswordNeeded" in type_name:
                     msg = await get_system_message(language_code, "connect_2fa_error")
                     await bot.send_message(chat_id=chat_id, text=msg)
-                    await client.disconnect()
                     return
                 if "Unauthorized" in str(e):
                     if DEBUG_PRINT:
@@ -231,16 +276,24 @@ async def _poll_qr_login(client, user_id: int, language_code: str, bot, chat_id:
         if not authorized:
             msg = await get_system_message(language_code, "connect_timeout")
             await bot.send_message(chat_id=chat_id, text=msg)
-            await client.disconnect()
             return
 
         # Получаем session string
         session_string = await client.export_session_string()
-        await client.disconnect()
 
         # Сохраняем в БД и запускаем слушатель
-        await save_session(user_id, session_string)
-        await pyrogram_client.start_listening(user_id, session_string)
+        saved = await save_session(user_id, session_string)
+        if not saved:
+            msg = await get_system_message(language_code, "connect_error")
+            await bot.send_message(chat_id=chat_id, text=msg)
+            return
+
+        started = await pyrogram_client.start_listening(user_id, session_string)
+        if not started:
+            await clear_session(user_id)
+            msg = await get_system_message(language_code, "connect_error")
+            await bot.send_message(chat_id=chat_id, text=msg)
+            return
 
         msg = await get_system_message(language_code, "connect_success")
         await bot.send_message(chat_id=chat_id, text=msg)
@@ -251,6 +304,8 @@ async def _poll_qr_login(client, user_id: int, language_code: str, bot, chat_id:
         traceback.print_exc()
         msg = await get_system_message(language_code, "connect_error")
         await bot.send_message(chat_id=chat_id, text=msg)
+    finally:
+        await _safe_disconnect_temp_client(client, user_id)
 
 
 # ====== PYROGRAM CALLBACK ======
@@ -274,7 +329,10 @@ async def on_pyrogram_message(user_id: int, pyrogram_client_instance, message) -
 
     if DEBUG_PRINT:
         sender = message.from_user.first_name if message.from_user else "Unknown"
-        print(f"{get_timestamp()} [PYROGRAM] New message for user {user_id} from {sender}: '{message.text[:50]}'")
+        print(
+            f"{get_timestamp()} [PYROGRAM] New message for user {user_id} "
+            f"from {sender} in chat {chat_id}: {len(message.text)} chars"
+        )
 
     try:
         # Показываем пользователю что бот работает
@@ -339,7 +397,10 @@ async def on_pyrogram_draft(user_id: int, chat_id: int, draft_text: str) -> None
     instruction = draft_text
 
     if DEBUG_PRINT:
-        print(f"{get_timestamp()} [DRAFT] User text for {user_id} in chat {chat_id}: '{instruction[:80]}'")
+        print(
+            f"{get_timestamp()} [DRAFT] User updated draft for {user_id} "
+            f"in chat {chat_id}: {len(instruction)} chars"
+        )
 
     # Сохраняем инструкцию и ставим пробу (статус-сообщение)
     user = await get_user(user_id)
@@ -363,7 +424,10 @@ async def on_pyrogram_draft(user_id: int, chat_id: int, draft_text: str) -> None
     _pending_drafts.pop(key, None)
 
     if DEBUG_PRINT:
-        print(f"{get_timestamp()} [DRAFT] User left chat, processing: '{instruction[:80]}'")
+        print(
+            f"{get_timestamp()} [DRAFT] Processing pending draft for {user_id} "
+            f"in chat {chat_id}: {len(instruction)} chars"
+        )
 
     try:
         # Читаем историю чата для контекста

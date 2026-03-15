@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from clients.x402gate import TopupError
+from clients.x402gate import NonRetriableRequestError, TopupError
 from clients.x402gate.openrouter import generate_response, generate_reply
 
 
@@ -80,6 +80,44 @@ class TestGenerateResponse:
 
         # Должен быть вызван только 1 раз (без retry)
         assert mock_client.request.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_non_retriable_request_error_not_retried(self):
+        with patch("clients.x402gate.openrouter.x402gate_client") as mock_client:
+            mock_client.available = True
+            mock_client.request = AsyncMock(side_effect=NonRetriableRequestError("bad request"))
+
+            with pytest.raises(NonRetriableRequestError):
+                await generate_response("Hi")
+
+        assert mock_client.request.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_empty_response_not_retried(self):
+        mock_result = {"data": {"choices": [{"message": {"content": ""}}]}}
+
+        with patch("clients.x402gate.openrouter.x402gate_client") as mock_client, \
+             patch("clients.x402gate.openrouter.RETRY_DELAY", 0):
+            mock_client.available = True
+            mock_client.request = AsyncMock(return_value=mock_result)
+
+            with pytest.raises(RuntimeError, match="empty response"):
+                await generate_response("Hi")
+
+        assert mock_client.request.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_retries_up_to_limit_for_retriable_errors(self):
+        with patch("clients.x402gate.openrouter.x402gate_client") as mock_client, \
+             patch("clients.x402gate.openrouter.RETRY_DELAY", 0), \
+             patch("clients.x402gate.openrouter.RETRY_ATTEMPTS", 2):
+            mock_client.available = True
+            mock_client.request = AsyncMock(side_effect=RuntimeError("temporary failure"))
+
+            with pytest.raises(RuntimeError, match="temporary failure"):
+                await generate_response("Hi")
+
+        assert mock_client.request.call_count == 3
 
     @pytest.mark.asyncio
     async def test_strips_whitespace(self):

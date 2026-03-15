@@ -26,28 +26,63 @@ class TestOnDisconnect:
     @pytest.mark.asyncio
     async def test_not_connected(self, mock_update, mock_context):
         """Не подключён → сообщение 'not connected'."""
-        with patch("handlers.pyrogram_handlers.pyrogram_client") as mock_pc:
+        with patch("handlers.pyrogram_handlers.pyrogram_client") as mock_pc, \
+             patch("handlers.pyrogram_handlers.clear_session", new_callable=AsyncMock, return_value=True) as mock_clear:
             mock_pc.is_active.return_value = False
 
             await on_disconnect(mock_update, mock_context)
 
         mock_update.message.reply_text.assert_called_once()
-        # stop_listening не должен вызываться
-        with patch("handlers.pyrogram_handlers.pyrogram_client") as mock_pc2:
-            mock_pc2.stop_listening.assert_not_called()
+        mock_pc.stop_listening.assert_not_called()
+        mock_clear.assert_called_once_with(mock_update.effective_user.id)
 
     @pytest.mark.asyncio
     async def test_disconnects(self, mock_update, mock_context):
         """Подключён → отключает и очищает сессию."""
         with patch("handlers.pyrogram_handlers.pyrogram_client") as mock_pc, \
-             patch("handlers.pyrogram_handlers.clear_session", new_callable=AsyncMock) as mock_clear:
+             patch("handlers.pyrogram_handlers.clear_session", new_callable=AsyncMock, return_value=True) as mock_clear:
             mock_pc.is_active.return_value = True
-            mock_pc.stop_listening = AsyncMock()
+            mock_pc.stop_listening = AsyncMock(return_value=True)
 
             await on_disconnect(mock_update, mock_context)
 
         mock_pc.stop_listening.assert_called_once_with(mock_update.effective_user.id)
         mock_clear.assert_called_once_with(mock_update.effective_user.id)
+
+    @pytest.mark.asyncio
+    async def test_disconnect_clears_saved_session_even_without_active_listener(self, mock_update, mock_context):
+        with patch("handlers.pyrogram_handlers.pyrogram_client") as mock_pc, \
+             patch("handlers.pyrogram_handlers.clear_session", new_callable=AsyncMock, return_value=True) as mock_clear:
+            mock_pc.is_active.return_value = False
+
+            await on_disconnect(mock_update, mock_context)
+
+        mock_pc.stop_listening.assert_not_called()
+        mock_clear.assert_called_once_with(mock_update.effective_user.id)
+
+    @pytest.mark.asyncio
+    async def test_disconnect_returns_error_when_stop_fails(self, mock_update, mock_context):
+        with patch("handlers.pyrogram_handlers.pyrogram_client") as mock_pc, \
+             patch("handlers.pyrogram_handlers.clear_session", new_callable=AsyncMock, return_value=True) as mock_clear, \
+             patch("handlers.pyrogram_handlers.get_system_message", new_callable=AsyncMock, return_value="Disconnect failed"):
+            mock_pc.is_active.return_value = True
+            mock_pc.stop_listening = AsyncMock(return_value=False)
+
+            await on_disconnect(mock_update, mock_context)
+
+        mock_clear.assert_not_called()
+        mock_update.message.reply_text.assert_called_once_with("Disconnect failed")
+
+    @pytest.mark.asyncio
+    async def test_disconnect_returns_error_when_clear_session_fails(self, mock_update, mock_context):
+        with patch("handlers.pyrogram_handlers.pyrogram_client") as mock_pc, \
+             patch("handlers.pyrogram_handlers.clear_session", new_callable=AsyncMock, return_value=False), \
+             patch("handlers.pyrogram_handlers.get_system_message", new_callable=AsyncMock, return_value="Disconnect failed"):
+            mock_pc.is_active.return_value = False
+
+            await on_disconnect(mock_update, mock_context)
+
+        mock_update.message.reply_text.assert_called_once_with("Disconnect failed")
 
 
 class TestOnStatus:
@@ -95,6 +130,7 @@ class TestOnConnect:
              patch("handlers.pyrogram_handlers.qrcode.make", return_value=mock_qr), \
              patch("handlers.pyrogram_handlers.upsert_user", new_callable=AsyncMock) as mock_upsert, \
              patch("handlers.pyrogram_handlers.get_system_message", new_callable=AsyncMock, return_value="Scan QR"), \
+             patch("handlers.pyrogram_handlers._get_qr_login_task", return_value=None), \
              patch("handlers.pyrogram_handlers.asyncio.create_task", side_effect=create_task_stub) as mock_create_task, \
              patch("handlers.pyrogram_handlers._register_qr_login_task") as mock_register_task:
             mock_pc.is_active.return_value = False
@@ -113,7 +149,18 @@ class TestOnConnect:
         mock_client.connect.assert_called_once()
         mock_update.message.reply_photo.assert_called_once()
         mock_create_task.assert_called_once()
-        mock_register_task.assert_called_once_with(task)
+        mock_register_task.assert_called_once_with(mock_update.effective_user.id, task)
+
+    @pytest.mark.asyncio
+    async def test_connect_rejects_when_qr_login_already_running(self, mock_update, mock_context):
+        with patch("handlers.pyrogram_handlers.pyrogram_client") as mock_pc, \
+             patch("handlers.pyrogram_handlers._get_qr_login_task", return_value=MagicMock()), \
+             patch("handlers.pyrogram_handlers.get_system_message", new_callable=AsyncMock, return_value="In progress"):
+            mock_pc.is_active.return_value = False
+
+            await on_connect(mock_update, mock_context)
+
+        mock_update.message.reply_text.assert_called_once_with("In progress")
 
     @pytest.mark.asyncio
     async def test_poll_qr_login_success_saves_session_and_starts_listening(self, mock_bot):
@@ -126,7 +173,7 @@ class TestOnConnect:
         mock_client.disconnect = AsyncMock()
 
         with patch("handlers.pyrogram_handlers.asyncio.sleep", new_callable=AsyncMock), \
-             patch("handlers.pyrogram_handlers.save_session", new_callable=AsyncMock) as mock_save_session, \
+             patch("handlers.pyrogram_handlers.save_session", new_callable=AsyncMock, return_value=True) as mock_save_session, \
              patch("handlers.pyrogram_handlers.pyrogram_client") as mock_pc, \
              patch("handlers.pyrogram_handlers.get_system_message", new_callable=AsyncMock, return_value="Connected"):
             mock_pc.start_listening = AsyncMock(return_value=True)
@@ -138,6 +185,47 @@ class TestOnConnect:
         mock_save_session.assert_called_once_with(123, "session-123")
         mock_pc.start_listening.assert_called_once_with(123, "session-123")
         mock_bot.send_message.assert_called_once_with(chat_id=456, text="Connected")
+
+    @pytest.mark.asyncio
+    async def test_poll_qr_login_stops_when_save_session_fails(self, mock_bot):
+        login_success = type("LoginTokenSuccess", (), {})()
+
+        mock_client = AsyncMock()
+        mock_client.invoke = AsyncMock(return_value=login_success)
+        mock_client.export_session_string = AsyncMock(return_value="session-123")
+        mock_client.disconnect = AsyncMock()
+
+        with patch("handlers.pyrogram_handlers.asyncio.sleep", new_callable=AsyncMock), \
+             patch("handlers.pyrogram_handlers.save_session", new_callable=AsyncMock, return_value=False), \
+             patch("handlers.pyrogram_handlers.pyrogram_client") as mock_pc, \
+             patch("handlers.pyrogram_handlers.get_system_message", new_callable=AsyncMock, return_value="Connect failed"):
+            mock_pc.start_listening = AsyncMock(return_value=True)
+
+            await _poll_qr_login(mock_client, 123, "en", mock_bot, 456)
+
+        mock_pc.start_listening.assert_not_called()
+        mock_bot.send_message.assert_called_once_with(chat_id=456, text="Connect failed")
+
+    @pytest.mark.asyncio
+    async def test_poll_qr_login_clears_session_when_listener_start_fails(self, mock_bot):
+        login_success = type("LoginTokenSuccess", (), {})()
+
+        mock_client = AsyncMock()
+        mock_client.invoke = AsyncMock(return_value=login_success)
+        mock_client.export_session_string = AsyncMock(return_value="session-123")
+        mock_client.disconnect = AsyncMock()
+
+        with patch("handlers.pyrogram_handlers.asyncio.sleep", new_callable=AsyncMock), \
+             patch("handlers.pyrogram_handlers.save_session", new_callable=AsyncMock, return_value=True), \
+             patch("handlers.pyrogram_handlers.clear_session", new_callable=AsyncMock, return_value=True) as mock_clear, \
+             patch("handlers.pyrogram_handlers.pyrogram_client") as mock_pc, \
+             patch("handlers.pyrogram_handlers.get_system_message", new_callable=AsyncMock, return_value="Connect failed"):
+            mock_pc.start_listening = AsyncMock(return_value=False)
+
+            await _poll_qr_login(mock_client, 123, "en", mock_bot, 456)
+
+        mock_clear.assert_called_once_with(123)
+        mock_bot.send_message.assert_called_once_with(chat_id=456, text="Connect failed")
 
 
 class TestOnPyrogramMessage:

@@ -32,6 +32,11 @@ class TopupError(RuntimeError):
     pass
 
 
+class NonRetriableRequestError(RuntimeError):
+    """Ошибка запроса, которую не стоит автоматически повторять."""
+    pass
+
+
 class X402GateClient:
     """Клиент x402gate.io — прокси для AI-сервисов с оплатой через USDC на Base.
 
@@ -118,6 +123,11 @@ class X402GateClient:
 
         amount = amount_usd or X402GATE_PREPAID_TOPUP_AMOUNT
         url = f"{self.base_url}/v1/topup"
+        starting_balance = (
+            self._prepaid_balance
+            if self._prepaid_balance is not None
+            else await self.get_balance()
+        )
 
         print(f"{get_timestamp()} [X402GATE] Prepaid top-up: ${amount:.2f}...")
 
@@ -156,14 +166,33 @@ class X402GateClient:
                 ).decode()
 
                 # 3. Повторный запрос с PAYMENT-SIGNATURE
-                response = await http.post(
-                    url,
-                    json={"amount": amount},
-                    headers={"PAYMENT-SIGNATURE": signature},
-                    timeout=X402GATE_TIMEOUT,
-                )
+                try:
+                    response = await http.post(
+                        url,
+                        json={"amount": amount},
+                        headers={"PAYMENT-SIGNATURE": signature},
+                        timeout=X402GATE_TIMEOUT,
+                    )
+                except Exception:
+                    refreshed_balance = await self.get_balance()
+                    if refreshed_balance > starting_balance:
+                        print(
+                            f"{get_timestamp()} [X402GATE] Prepaid top-up likely succeeded despite "
+                            f"transport error, balance=${refreshed_balance:.4f}"
+                        )
+                        self._topup_generation += 1
+                        return refreshed_balance
+                    raise
 
                 if response.status_code != 200:
+                    refreshed_balance = await self.get_balance()
+                    if refreshed_balance > starting_balance:
+                        print(
+                            f"{get_timestamp()} [X402GATE] Prepaid top-up reconciled after "
+                            f"unexpected status {response.status_code}, balance=${refreshed_balance:.4f}"
+                        )
+                        self._topup_generation += 1
+                        return refreshed_balance
                     raise RuntimeError(
                         f"x402gate /v1/topup failed after payment: "
                         f"{response.status_code} {response.text[:500]}"
@@ -270,9 +299,12 @@ class X402GateClient:
 
             if response.status_code != 200:
                 error_text = response.text[:500]
-                raise RuntimeError(
-                    f"x402gate returned {response.status_code}: {error_text}"
+                error_cls = (
+                    NonRetriableRequestError
+                    if 400 <= response.status_code < 500 and response.status_code not in (408, 409, 425, 429)
+                    else RuntimeError
                 )
+                raise error_cls(f"x402gate returned {response.status_code}: {error_text}")
 
             result = response.json()
 
