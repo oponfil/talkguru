@@ -8,6 +8,7 @@ from typing import Dict
 
 from clients.x402gate.openrouter import generate_response
 from config import (
+    CUSTOM_PROMPT_MAX_LENGTH,
     DEFAULT_LANGUAGE_CODE,
     DEBUG_PRINT,
     SYSTEM_MESSAGES_FALLBACK_TTL_SECONDS,
@@ -39,14 +40,15 @@ SYSTEM_MESSAGES = {
     "menu_disconnect": "Disconnect account",
     "menu_status": "Connection status",
     "draft_typing": "🦉 is typing...",
-    "settings_title": "⚙️ Settings",
+    "settings_title": "⚙️ Settings\nTap buttons to change.",
     "settings_drafts_on": "✏️ Drafts: ✅ ON",
     "settings_drafts_off": "✏️ Drafts: ❌ OFF",
     "settings_model_free": "🤖 Model: FREE",
     "settings_model_pro": "🤖 Model: ⭐ PRO",
     "settings_prompt_set": "📝 Prompt: ✅ set (tap to clear)",
     "settings_prompt_empty": "📝 Prompt: not set",
-    "settings_prompt_enter": "📝 Send your custom prompt as a message. It will be added to the AI system prompt for all chats.",
+    "settings_prompt_enter": f"📝 Send your custom prompt as a message. It will be added to the AI system prompt for all chats.\n\n⚠️ Max length: {CUSTOM_PROMPT_MAX_LENGTH} characters.",
+    "settings_prompt_truncated": f"⚠️ Prompt was too long, so I saved only the first {CUSTOM_PROMPT_MAX_LENGTH} characters.",
     "settings_prompt_saved": "✅ Custom prompt saved!",
     "menu_settings": "Settings",
 }

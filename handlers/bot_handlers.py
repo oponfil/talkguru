@@ -5,7 +5,7 @@ import traceback
 from telegram import Update
 from telegram.ext import ContextTypes
 
-from config import DEBUG_PRINT, LLM_MODEL_PRO, MAX_CONTEXT_MESSAGES
+from config import CUSTOM_PROMPT_MAX_LENGTH, DEBUG_PRINT, LLM_MODEL_PRO, MAX_CONTEXT_MESSAGES
 from utils.utils import get_timestamp, typing_action
 from utils.bot_utils import update_user_menu
 from clients.x402gate.openrouter import generate_response
@@ -63,17 +63,23 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     # Проверяем: пользователь вводит кастомный промпт?
     if context.user_data.get("awaiting_prompt"):
-        saved = await update_user_settings(u.id, {"custom_prompt": message_text.strip()})
+        prompt_text = message_text.strip()
+        was_truncated = len(prompt_text) > CUSTOM_PROMPT_MAX_LENGTH
+        if was_truncated:
+            prompt_text = prompt_text[:CUSTOM_PROMPT_MAX_LENGTH]
+
+        saved = await update_user_settings(u.id, {"custom_prompt": prompt_text})
         if not saved:
             error_msg = await get_system_message(u.language_code, "error")
             await m.reply_text(error_msg)
             return
 
         context.user_data.pop("awaiting_prompt", None)
-        msg = await get_system_message(u.language_code, "settings_prompt_saved")
+        message_key = "settings_prompt_truncated" if was_truncated else "settings_prompt_saved"
+        msg = await get_system_message(u.language_code, message_key)
         await m.reply_text(msg)
         if DEBUG_PRINT:
-            print(f"{get_timestamp()} [BOT] Custom prompt saved for user {u.id}: {len(message_text)} chars")
+            print(f"{get_timestamp()} [BOT] Custom prompt saved for user {u.id}: {len(prompt_text)} chars")
         return
 
     # Обновляем last_msg_at

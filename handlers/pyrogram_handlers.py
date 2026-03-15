@@ -510,6 +510,8 @@ async def on_pyrogram_message(user_id: int, pyrogram_client_instance, message) -
         _bot_drafts[(user_id, chat_id)] = ai_text
         await pyrogram_client.set_draft(user_id, chat_id, ai_text)
 
+        print(f"{get_timestamp()} [PYROGRAM] Reply set as draft for user {user_id} in chat {chat_id}")
+
     except Exception as e:
         print(f"{get_timestamp()} [PYROGRAM] ERROR processing message for user {user_id}: {e}")
 

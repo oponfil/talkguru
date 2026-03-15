@@ -4,10 +4,10 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from handlers.settings_handler import on_settings, on_settings_callback
+from handlers.settings_handler import _build_settings_text, on_settings, on_settings_callback
 
 MESSAGES = {
-    "settings_title": "⚙️ Settings",
+    "settings_title": "⚙️ Settings\nTap buttons to change.",
     "settings_drafts_on": "✏️ Drafts: ✅ ON",
     "settings_drafts_off": "✏️ Drafts: ❌ OFF",
     "settings_model_free": "🤖 Model: FREE",
@@ -18,6 +18,29 @@ MESSAGES = {
     "settings_prompt_saved": "✅ Custom prompt saved!",
 }
 
+TITLE = MESSAGES["settings_title"]
+
+
+class TestBuildSettingsText:
+    """Тесты для _build_settings_text()."""
+
+    def test_no_prompt_returns_title(self):
+        """Без промпта → только заголовок."""
+        assert _build_settings_text(TITLE, {}) == TITLE
+        assert _build_settings_text(TITLE, {"custom_prompt": ""}) == TITLE
+
+    def test_short_prompt_shown_fully(self):
+        """Короткий промпт → показывается полностью."""
+        result = _build_settings_text(TITLE, {"custom_prompt": "Be friendly"})
+        assert "«Be friendly»" in result
+        assert "…" not in result
+
+    def test_long_prompt_shown_fully(self):
+        """Длинный промпт → показывается полностью."""
+        long_prompt = "A" * 900
+        result = _build_settings_text(TITLE, {"custom_prompt": long_prompt})
+        assert f"«{long_prompt}»" in result
+
 
 class TestOnSettings:
     """Тесты для on_settings()."""
@@ -26,7 +49,7 @@ class TestOnSettings:
     async def test_shows_default_settings(self, mock_update, mock_context):
         """Показывает настройки по умолчанию (drafts ON, FREE model)."""
         with patch("handlers.settings_handler.get_user_settings", new_callable=AsyncMock, return_value={}), \
-             patch("handlers.settings_handler.get_system_message", new_callable=AsyncMock, return_value="⚙️ Settings"), \
+             patch("handlers.settings_handler.get_system_message", new_callable=AsyncMock, return_value=TITLE), \
              patch("handlers.settings_handler.get_system_messages", new_callable=AsyncMock, return_value=MESSAGES):
             await on_settings(mock_update, mock_context)
 
@@ -42,7 +65,7 @@ class TestOnSettings:
         """Показывает сохранённые настройки (drafts OFF, PRO model)."""
         settings = {"drafts_enabled": False, "pro_model": True}
         with patch("handlers.settings_handler.get_user_settings", new_callable=AsyncMock, return_value=settings), \
-             patch("handlers.settings_handler.get_system_message", new_callable=AsyncMock, return_value="⚙️ Settings"), \
+             patch("handlers.settings_handler.get_system_message", new_callable=AsyncMock, return_value=TITLE), \
              patch("handlers.settings_handler.get_system_messages", new_callable=AsyncMock, return_value=MESSAGES):
             await on_settings(mock_update, mock_context)
 
@@ -50,6 +73,18 @@ class TestOnSettings:
         buttons = keyboard.inline_keyboard
         assert buttons[0][0].text == "✏️ Drafts: ❌ OFF"
         assert buttons[1][0].text == "🤖 Model: ⭐ PRO"
+
+    @pytest.mark.asyncio
+    async def test_shows_prompt_preview(self, mock_update, mock_context):
+        """При установленном промпте — превью в тексте сообщения."""
+        settings = {"custom_prompt": "Be concise and friendly"}
+        with patch("handlers.settings_handler.get_user_settings", new_callable=AsyncMock, return_value=settings), \
+             patch("handlers.settings_handler.get_system_message", new_callable=AsyncMock, return_value=TITLE), \
+             patch("handlers.settings_handler.get_system_messages", new_callable=AsyncMock, return_value=MESSAGES):
+            await on_settings(mock_update, mock_context)
+
+        sent_text = mock_update.message.reply_text.call_args.args[0]
+        assert "«Be concise and friendly»" in sent_text
 
 
 class TestOnSettingsCallback:

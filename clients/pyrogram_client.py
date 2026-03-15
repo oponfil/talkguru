@@ -154,10 +154,18 @@ async def _handle_draft_update(user_id: int, update: raw.types.UpdateDraftMessag
         return
 
     try:
-        # Извлекаем chat_id из peer (личные, группы, каналы)
+        # Извлекаем chat_id из peer и конвертируем в стандартный Telegram формат:
+        # PeerUser.user_id → положительный (без изменений)
+        # PeerChat.chat_id → отрицательный (-chat_id)
+        # PeerChannel.channel_id → отрицательный с префиксом -100 (-100channel_id)
         peer = update.peer
-        chat_id = getattr(peer, "user_id", None) or getattr(peer, "chat_id", None) or getattr(peer, "channel_id", None)
-        if not chat_id:
+        if hasattr(peer, "user_id"):
+            chat_id = peer.user_id
+        elif hasattr(peer, "chat_id"):
+            chat_id = -peer.chat_id
+        elif hasattr(peer, "channel_id"):
+            chat_id = int(f"-100{peer.channel_id}")
+        else:
             return
 
         # Извлекаем текст черновика (может быть пустым при очистке)

@@ -169,7 +169,7 @@ class TestHandleDraftUpdate:
         callback = AsyncMock()
         pyrogram_client._on_draft_callback = callback
 
-        update = MagicMock()
+        update = MagicMock(spec=[])
         update.peer = MagicMock(spec=[])  # Нет атрибутов
         update.draft = MagicMock()
         update.draft.message = "text"
@@ -179,3 +179,40 @@ class TestHandleDraftUpdate:
         callback.assert_not_called()
 
         pyrogram_client._on_draft_callback = None
+
+    @pytest.mark.asyncio
+    async def test_converts_group_chat_id(self):
+        """PeerChat.chat_id = 456 → callback получает -456."""
+        callback = AsyncMock()
+        pyrogram_client._on_draft_callback = callback
+
+        update = MagicMock()
+        update.peer = MagicMock(spec=["chat_id"])
+        update.peer.chat_id = 456
+        update.draft = MagicMock()
+        update.draft.message = "group draft"
+
+        await pyrogram_client._handle_draft_update(123, update)
+
+        callback.assert_called_once_with(123, -456, "group draft")
+
+        pyrogram_client._on_draft_callback = None
+
+    @pytest.mark.asyncio
+    async def test_converts_channel_id(self):
+        """PeerChannel.channel_id = 789 → callback получает -100789."""
+        callback = AsyncMock()
+        pyrogram_client._on_draft_callback = callback
+
+        update = MagicMock()
+        update.peer = MagicMock(spec=["channel_id"])
+        update.peer.channel_id = 789
+        update.draft = MagicMock()
+        update.draft.message = "channel draft"
+
+        await pyrogram_client._handle_draft_update(123, update)
+
+        callback.assert_called_once_with(123, -100789, "channel draft")
+
+        pyrogram_client._on_draft_callback = None
+

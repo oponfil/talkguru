@@ -27,6 +27,15 @@ def _build_settings_keyboard(settings: dict, messages: dict) -> InlineKeyboardMa
     return InlineKeyboardMarkup(keyboard)
 
 
+def _build_settings_text(title: str, settings: dict) -> str:
+    """Формирует текст сообщения настроек с превью промпта."""
+    custom_prompt = settings.get("custom_prompt", "")
+    if not custom_prompt:
+        return title
+
+    return f"{title}\n\n📝 «{custom_prompt}»"
+
+
 async def _send_settings_error(query, language_code: str | None) -> None:
     """Отправляет сообщение об ошибке сохранения настроек."""
     error_msg = await get_system_message(language_code, "error")
@@ -43,8 +52,9 @@ async def on_settings(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
     messages = await get_system_messages(u.language_code)
 
+    text = _build_settings_text(title, settings)
     keyboard = _build_settings_keyboard(settings, messages)
-    await update.message.reply_text(title, reply_markup=keyboard)
+    await update.message.reply_text(text, reply_markup=keyboard)
 
     if DEBUG_PRINT:
         print(f"{get_timestamp()} [BOT] /settings from user {u.id}")
@@ -97,8 +107,9 @@ async def on_settings_callback(update: Update, context: ContextTypes.DEFAULT_TYP
 
     keyboard = _build_settings_keyboard(updated_settings, messages)
     title = messages.get("settings_title", "⚙️ Settings")
+    text = _build_settings_text(title, updated_settings)
 
-    await query.edit_message_text(text=title, reply_markup=keyboard)
+    await query.edit_message_text(text=text, reply_markup=keyboard)
 
     if DEBUG_PRINT:
         print(f"{get_timestamp()} [BOT] Settings updated by user {u.id}: {action}")
