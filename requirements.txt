@@ -20,8 +20,9 @@ x402[evm]>=0.1.0
 pyrogram>=2.0.0
 tgcrypto>=1.2.0
 
-# QR-код для /connectqr
+# QR-код для /connect
 qrcode>=7.0
+Pillow>=10.0.0
 
 # Тестирование
 pytest>=8.0.0
