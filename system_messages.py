@@ -85,6 +85,7 @@ SYSTEM_MESSAGES = {
     "settings_style_business": "💼 Style: Business Guru",
     "settings_style_sales": "💰 Style: Sales Guru",
     "settings_style_friend": "🍻 Style: Friend Guru",
+    "settings_style_seducer": "😈 Style: Seducer Guru",
 }
 
 

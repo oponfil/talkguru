@@ -218,7 +218,11 @@ async def update_user_settings(user_id: int, settings: dict) -> bool:
             )
 
         if DEBUG_PRINT:
-            print(f"{get_timestamp()} [DB] Settings updated for user {user_id}: {merged}")
+            log_settings = {**merged}
+            cp = log_settings.get("custom_prompt")
+            if cp and len(cp) > 30:
+                log_settings["custom_prompt"] = cp[:30] + "…"
+            print(f"{get_timestamp()} [DB] Settings updated for user {user_id}: {log_settings}")
         return True
     except Exception as e:
         print(f"{get_timestamp()} [DB] ERROR update_user_settings {user_id}: {e}")

@@ -265,6 +265,40 @@ class TestHandleDraftUpdate:
         pyrogram_client._on_draft_callback = None
 
 
+class TestHandleRawNewMessage:
+    """Тесты для _handle_raw_new_message()."""
+
+    def teardown_method(self):
+        pyrogram_client._on_new_message_callback = None
+        pyrogram_client._processed_msg_ids.clear()
+
+    @pytest.mark.asyncio
+    async def test_same_message_id_in_another_chat_is_not_treated_as_duplicate(self):
+        """Одинаковый message.id в другом личном чате не должен дедуплицироваться."""
+        callback = AsyncMock()
+        pyrogram_client._on_new_message_callback = callback
+        pyrogram_client._processed_msg_ids[123].add((456, 1))
+
+        client = AsyncMock()
+        update = MagicMock()
+        update.message = MagicMock()
+        update.message.id = 1
+        update.message.out = False
+        update.message.peer_id = MagicMock()
+        update.message.peer_id.user_id = 789
+
+        parsed_message = MagicMock()
+        with patch(
+            "clients.pyrogram_client.pyrogram.types.Message._parse",
+            new=AsyncMock(return_value=parsed_message),
+        ) as mock_parse:
+            await pyrogram_client._handle_raw_new_message(123, client, update, users={})
+
+        mock_parse.assert_awaited_once_with(client, update.message, {}, {})
+        callback.assert_awaited_once_with(123, client, parsed_message)
+        assert (789, 1) in pyrogram_client._processed_msg_ids[123]
+
+
 class TestTranscribeVoice:
     """Тесты для transcribe_voice()."""
 

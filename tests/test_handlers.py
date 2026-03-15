@@ -13,6 +13,8 @@ from handlers.pyrogram_handlers import (
     _pending_drafts,
     _pending_phone,
     _poll_qr_login,
+    _reply_locks,
+    _reply_pending,
     handle_2fa_password,
     handle_connect_text,
     on_connect_qr_callback,
@@ -37,6 +39,8 @@ def cleanup_handler_state():
     _pending_drafts.clear()
     _pending_2fa.clear()
     _pending_phone.clear()
+    _reply_locks.clear()
+    _reply_pending.clear()
     yield
     _auto_reply_tasks.clear()
     _bot_drafts.clear()
@@ -44,6 +48,8 @@ def cleanup_handler_state():
     _pending_drafts.clear()
     _pending_2fa.clear()
     _pending_phone.clear()
+    _reply_locks.clear()
+    _reply_pending.clear()
 
 
 class TestOnDisconnect:
@@ -435,6 +441,107 @@ class TestOnPyrogramMessage:
             await on_pyrogram_message(123, MagicMock(), message)
 
         mock_schedule.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_second_message_during_lock_is_queued(self):
+        """Второе сообщение во время генерации ставит pending-флаг и не вызывает AI."""
+        # Имитируем активный лок
+        _reply_locks[(123, 456)] = True
+
+        message = MagicMock()
+        message.text = "Second message"
+        message.voice = None
+        message.outgoing = False
+        message.from_user = MagicMock()
+        message.from_user.is_bot = False
+        message.from_user.first_name = "Test"
+        message.chat = MagicMock()
+        message.chat.id = 456
+        message.chat.type = MagicMock(value="private")
+
+        with patch("handlers.pyrogram_handlers.pyrogram_client") as mock_pc, \
+             patch("handlers.pyrogram_handlers.generate_reply", new_callable=AsyncMock) as mock_gen, \
+             patch("handlers.pyrogram_handlers.get_user_settings", new_callable=AsyncMock, return_value={}):
+            mock_pc.set_draft = AsyncMock()
+
+            await on_pyrogram_message(123, MagicMock(), message)
+
+        # AI не вызван — сообщение поставлено в очередь
+        mock_gen.assert_not_called()
+        assert _reply_pending[(123, 456)] is True
+        # Лок всё ещё активен (не снимался)
+        assert _reply_locks[(123, 456)] is True
+
+    @pytest.mark.asyncio
+    async def test_pending_message_triggers_regeneration_after_lock_release(self):
+        """После генерации с pending-флагом запускается _regenerate_reply."""
+        message = MagicMock()
+        message.text = "Hello"
+        message.outgoing = False
+        message.from_user = MagicMock()
+        message.from_user.is_bot = False
+        message.from_user.first_name = "Test"
+        message.chat = MagicMock()
+        message.chat.id = 456
+        message.chat.type = MagicMock(value="private")
+
+        # Ставим pending-флаг до вызова (имитация: второе сообщение пришло)
+        _reply_pending[(123, 456)] = True
+
+        with patch("handlers.pyrogram_handlers.pyrogram_client") as mock_pc, \
+             patch("handlers.pyrogram_handlers.generate_reply", new_callable=AsyncMock) as mock_gen, \
+             patch("handlers.pyrogram_handlers.get_user", new_callable=AsyncMock, return_value={"language_code": "en"}), \
+             patch("handlers.pyrogram_handlers.get_system_message", new_callable=AsyncMock, return_value=TYPING_TEXT), \
+             patch("handlers.pyrogram_handlers.get_user_settings", new_callable=AsyncMock, return_value={}), \
+             patch("handlers.pyrogram_handlers._regenerate_reply", new_callable=AsyncMock), \
+             patch("handlers.pyrogram_handlers.asyncio.create_task") as mock_create_task:
+            mock_pc.read_chat_history = AsyncMock(return_value=[
+                {"role": "other", "text": "Hello"}
+            ])
+            mock_pc.set_draft = AsyncMock(return_value=True)
+            mock_gen.return_value = "Hi there!"
+
+            await on_pyrogram_message(123, MagicMock(), message)
+
+        # generate_reply был вызван (первое сообщение обработано)
+        mock_gen.assert_called_once()
+        # _regenerate_reply запущена через create_task
+        mock_create_task.assert_called_once()
+        # Лок снят после завершения
+        assert (123, 456) not in _reply_locks
+        assert (123, 456) not in _reply_pending
+
+    @pytest.mark.asyncio
+    async def test_no_regeneration_without_pending(self):
+        """Без pending-флага _regenerate_reply не вызывается."""
+        message = MagicMock()
+        message.text = "Hello"
+        message.outgoing = False
+        message.from_user = MagicMock()
+        message.from_user.is_bot = False
+        message.from_user.first_name = "Test"
+        message.chat = MagicMock()
+        message.chat.id = 456
+        message.chat.type = MagicMock(value="private")
+
+        with patch("handlers.pyrogram_handlers.pyrogram_client") as mock_pc, \
+             patch("handlers.pyrogram_handlers.generate_reply", new_callable=AsyncMock) as mock_gen, \
+             patch("handlers.pyrogram_handlers.get_user", new_callable=AsyncMock, return_value={"language_code": "en"}), \
+             patch("handlers.pyrogram_handlers.get_system_message", new_callable=AsyncMock, return_value=TYPING_TEXT), \
+             patch("handlers.pyrogram_handlers.get_user_settings", new_callable=AsyncMock, return_value={}), \
+             patch("handlers.pyrogram_handlers.asyncio.create_task") as mock_create_task:
+            mock_pc.read_chat_history = AsyncMock(return_value=[
+                {"role": "other", "text": "Hello"}
+            ])
+            mock_pc.set_draft = AsyncMock(return_value=True)
+            mock_gen.return_value = "Hi there!"
+
+            await on_pyrogram_message(123, MagicMock(), message)
+
+        mock_gen.assert_called_once()
+        mock_create_task.assert_not_called()
+        assert (123, 456) not in _reply_locks
+        assert (123, 456) not in _reply_pending
 
 
 class TestHandle2FAPassword:

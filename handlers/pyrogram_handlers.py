@@ -871,11 +871,18 @@ async def on_pyrogram_message(user_id: int, pyrogram_client_instance, message) -
             f"from {sender} in chat {chat_id}: {len(text)} chars"
         )
 
-    try:
-        # Новый входящий сбрасывает предыдущий автоответ для этого чата.
-        _cancel_auto_reply(key)
-        _bot_drafts.pop(key, None)
+    # Лок: если уже генерируем ответ для этого чата — ставим флаг и уходим.
+    # Когда текущая генерация закончится, она увидит флаг и перегенерирует.
+    _cancel_auto_reply(key)
+    _bot_drafts.pop(key, None)
+    if _reply_locks.get(key):
+        _reply_pending[key] = True
+        if DEBUG_PRINT:
+            print(f"{get_timestamp()} [PYROGRAM] Reply locked for user {user_id} in chat {chat_id}, queued")
+        return
 
+    _reply_locks[key] = True
+    try:
         # Показываем пользователю что бот работает
         user = await get_user(user_id)
         lang = user.get("language_code") if user else None
@@ -934,6 +941,84 @@ async def on_pyrogram_message(user_id: int, pyrogram_client_instance, message) -
 
     except Exception as e:
         print(f"{get_timestamp()} [PYROGRAM] ERROR processing message for user {user_id}: {e}")
+    finally:
+        _reply_locks.pop(key, None)
+        if _reply_pending.pop(key, None):
+            asyncio.create_task(_regenerate_reply(user_id, chat_id))
+
+
+async def _regenerate_reply(user_id: int, chat_id: int) -> None:
+    """Перегенерирует ответ на актуальной истории после снятия лока.
+
+    Вызывается когда во время генерации пришли новые сообщения.
+    Использует тот же лок для предотвращения параллельных вызовов.
+    """
+    key = (user_id, chat_id)
+
+    # Проверяем лок (на случай гонки)
+    if _reply_locks.get(key):
+        _reply_pending[key] = True
+        return
+
+    _reply_locks[key] = True
+    try:
+        user_settings = await get_user_settings(user_id)
+        user = await get_user(user_id)
+        lang = user.get("language_code") if user else None
+
+        # Показываем пробу
+        probe_text = await get_system_message(lang, "draft_typing")
+        _bot_draft_echoes[key] = probe_text
+        await pyrogram_client.set_draft(user_id, chat_id, probe_text)
+
+        # Читаем актуальную историю
+        history = await pyrogram_client.read_chat_history(user_id, chat_id)
+        if not history:
+            return
+
+        # Извлекаем opponent из последнего входящего сообщения
+        opponent_info = None
+        for msg in reversed(history):
+            if msg["role"] == "other" and msg.get("name"):
+                opponent_info = {
+                    "first_name": msg.get("name"),
+                    "last_name": msg.get("last_name"),
+                    "username": msg.get("username"),
+                }
+                break
+
+        # Генерируем ответ
+        kwargs: dict = {}
+        if user_settings.get("pro_model"):
+            kwargs["model"] = LLM_MODEL_PRO
+        custom_prompt = user_settings.get("custom_prompt", "")
+        style = user_settings.get("style")
+        tz_offset = user_settings.get("tz_offset", 0) or 0
+        reply_text = await generate_reply(
+            history, user, opponent_info,
+            custom_prompt=custom_prompt, style=style, tz_offset=tz_offset,
+            **kwargs,
+        )
+        if not reply_text or not reply_text.strip():
+            return
+
+        ai_text = reply_text.strip()
+        _bot_drafts[key] = ai_text
+        _bot_draft_echoes[key] = ai_text
+        await pyrogram_client.set_draft(user_id, chat_id, ai_text)
+
+        print(f"{get_timestamp()} [PYROGRAM] Reply re-generated for user {user_id} in chat {chat_id}")
+
+        auto_reply = normalize_auto_reply(user_settings.get("auto_reply"))
+        if auto_reply:
+            _schedule_auto_reply(user_id, chat_id, ai_text, auto_reply)
+
+    except Exception as e:
+        print(f"{get_timestamp()} [PYROGRAM] ERROR re-generating reply for user {user_id}: {e}")
+    finally:
+        _reply_locks.pop(key, None)
+        if _reply_pending.pop(key, None):
+            asyncio.create_task(_regenerate_reply(user_id, chat_id))
 
 
 # Тексты черновиков, установленные ботом: {(user_id, chat_id): text}
@@ -947,6 +1032,12 @@ _pending_drafts: dict[tuple[int, int], str] = {}
 
 # Активные таймеры автоответа: {(user_id, chat_id): asyncio.Task}
 _auto_reply_tasks: dict[tuple[int, int], asyncio.Task] = {}
+
+# Лок на генерацию ответа: {(user_id, chat_id): True}
+_reply_locks: dict[tuple[int, int], bool] = {}
+
+# Флаг «пришло новое сообщение во время генерации»: {(user_id, chat_id): True}
+_reply_pending: dict[tuple[int, int], bool] = {}
 
 
 def _cancel_auto_reply(key: tuple[int, int]) -> None:

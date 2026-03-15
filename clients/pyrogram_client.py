@@ -1,8 +1,10 @@
 # clients/pyrogram_client.py — Управление Pyrogram-сессиями пользователей
 
 import asyncio
+from collections import defaultdict
 
 from pyrogram import Client, filters, raw
+import pyrogram
 from pyrogram.handlers import MessageHandler, RawUpdateHandler
 
 from config import PYROGRAM_API_ID, PYROGRAM_API_HASH, MAX_CONTEXT_MESSAGES, DEBUG_PRINT, VOICE_TRANSCRIPTION_TIMEOUT
@@ -24,6 +26,19 @@ _on_new_message_callback = None
 
 # Callback для обработки черновиков (устанавливается из bot.py)
 _on_draft_callback = None
+
+# ID сообщений, уже обработанных через MessageHandler (для дедупликации с RawUpdateHandler).
+# Ключ — (chat_id, message_id), чтобы одинаковые message.id из разных диалогов
+# не считались дубликатами. Последние 200 ключей на каждого пользователя.
+_processed_msg_ids: dict[int, set[tuple[int, int]]] = defaultdict(set)
+_PROCESSED_IDS_MAX = 200
+
+
+def _make_processed_message_key(chat_id: int | None, message_id: int | None) -> tuple[int, int] | None:
+    """Собирает ключ дедупликации сообщения."""
+    if chat_id is None or message_id is None:
+        return None
+    return (chat_id, message_id)
 
 
 def set_message_callback(callback) -> None:
@@ -119,18 +134,30 @@ async def start_listening(user_id: int, session_string: str) -> bool:
         await client.start()
 
         # Хендлер входящих сообщений (только личные чаты, не от себя)
-        async def on_incoming(pyrogram_client: Client, message):
+        async def on_incoming(pyrogram_client_inst: Client, message):
+            # Отмечаем как обработанное, чтобы raw handler не дублировал
+            processed_key = _make_processed_message_key(
+                getattr(message.chat, "id", None),
+                getattr(message, "id", None),
+            )
+            if processed_key:
+                _processed_msg_ids[user_id].add(processed_key)
             if _on_new_message_callback:
-                await _on_new_message_callback(user_id, pyrogram_client, message)
+                await _on_new_message_callback(user_id, pyrogram_client_inst, message)
 
         client.add_handler(
             MessageHandler(on_incoming, filters.private & filters.incoming)
         )
 
-        # Хендлер черновиков (raw update)
-        async def on_raw(client: Client, update, users, chats):
+        # Хендлер raw updates: черновики + fallback для пропущенных сообщений.
+        # Pyrogram может уронить Message._parse() (например ValueError: Peer id invalid
+        # в другом update того же батча) — тогда MessageHandler не вызовется.
+        # RawUpdateHandler не проходит через _parse, поэтому более устойчив.
+        async def on_raw(client_inst: Client, update, users, chats):
             if isinstance(update, raw.types.UpdateDraftMessage):
                 await _handle_draft_update(user_id, update)
+            elif isinstance(update, (raw.types.UpdateNewMessage,)):
+                await _handle_raw_new_message(user_id, client_inst, update, users)
 
         client.add_handler(RawUpdateHandler(on_raw))
 
@@ -251,6 +278,64 @@ async def _handle_draft_update(user_id: int, update: raw.types.UpdateDraftMessag
 
     except Exception as e:
         print(f"{get_timestamp()} [PYROGRAM] ERROR handling draft update for user {user_id}: {e}")
+
+
+async def _handle_raw_new_message(
+    user_id: int, client: Client, update: raw.types.UpdateNewMessage, users: dict,
+) -> None:
+    """Fallback-обработчик для UpdateNewMessage через RawUpdateHandler.
+
+    Вызывается если Pyrogram не смог распарсить сообщение через MessageHandler
+    (например, ValueError: Peer id invalid в батче). Проверяет дедупликацию
+    по _processed_msg_ids.
+    """
+    try:
+        msg = update.message
+
+        # Только PeerUser (личные чаты)
+        if not hasattr(msg, "peer_id") or not hasattr(msg.peer_id, "user_id"):
+            return
+
+        chat_id = msg.peer_id.user_id
+        msg_id = getattr(msg, "id", None)
+        processed_key = _make_processed_message_key(chat_id, msg_id)
+        if processed_key and processed_key in _processed_msg_ids.get(user_id, set()):
+            return
+
+        # Исходящее сообщение — пропускаем
+        if getattr(msg, "out", False):
+            return
+
+        # Пытаемся распарсить через Pyrogram (может упасть)
+        try:
+            parsed_message = await pyrogram.types.Message._parse(
+                client, msg, users, {}
+            )
+        except Exception as parse_err:
+            print(
+                f"{get_timestamp()} [PYROGRAM] WARNING: failed to parse message "
+                f"{msg_id} for user {user_id}: {parse_err}"
+            )
+            return
+
+        # Отмечаем как обработанное
+        ids_set = _processed_msg_ids[user_id]
+        if processed_key:
+            ids_set.add(processed_key)
+            # Чистим старые ID, чтобы set не рос бесконечно
+            if len(ids_set) > _PROCESSED_IDS_MAX:
+                to_remove = sorted(ids_set)[:len(ids_set) - _PROCESSED_IDS_MAX]
+                ids_set.difference_update(to_remove)
+
+        if _on_new_message_callback:
+            print(
+                f"{get_timestamp()} [PYROGRAM] Recovered message {msg_id} "
+                f"for user {user_id} via raw handler"
+            )
+            await _on_new_message_callback(user_id, client, parsed_message)
+
+    except Exception as e:
+        print(f"{get_timestamp()} [PYROGRAM] ERROR in raw message handler for user {user_id}: {e}")
 
 
 async def set_draft(user_id: int, chat_id: int, text: str) -> bool:

@@ -93,10 +93,11 @@ AUTO_REPLY_OPTIONS: dict[int | None, str] = {
 # {значение: ключ сообщения} — None = под пользователя (по умолчанию)
 STYLE_OPTIONS: dict[str | None, str] = {
     None: "settings_style_userlike",
-    "flirt": "settings_style_flirt",
+    "friend": "settings_style_friend",
     "business": "settings_style_business",
     "sales": "settings_style_sales",
-    "friend": "settings_style_friend",
+    "flirt": "settings_style_flirt",
+    "seducer": "settings_style_seducer",
 }
 
 # ====== ЧАСОВОЙ ПОЯС ======
