@@ -6,6 +6,7 @@ import pytest
 
 from clients.x402gate import NonRetriableRequestError, TopupError
 from clients.x402gate.openrouter import generate_response, generate_reply
+from prompts import BOT_PROMPT
 
 
 class TestGenerateResponse:
@@ -136,6 +137,34 @@ class TestGenerateResponse:
             result = await generate_response("Hi")
 
         assert result == "trimmed"
+
+    @pytest.mark.asyncio
+    async def test_includes_chat_history_in_payload(self):
+        """Добавляет chat_history между system и user сообщением."""
+        mock_result = {
+            "data": {
+                "choices": [{"message": {"content": "ok"}}],
+                "usage": {},
+            }
+        }
+        history = [
+            {"role": "user", "content": "u1"},
+            {"role": "assistant", "content": "a1"},
+        ]
+
+        with patch("clients.x402gate.openrouter.x402gate_client") as mock_client:
+            mock_client.available = True
+            mock_client.request = AsyncMock(return_value=mock_result)
+
+            await generate_response("Hi", chat_history=history)
+
+        payload = mock_client.request.call_args.args[1]
+        assert payload["messages"] == [
+            {"role": "system", "content": BOT_PROMPT},
+            {"role": "user", "content": "u1"},
+            {"role": "assistant", "content": "a1"},
+            {"role": "user", "content": "Hi"},
+        ]
 
 
 class TestGenerateReply:

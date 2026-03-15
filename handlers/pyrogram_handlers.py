@@ -7,11 +7,13 @@ import traceback
 
 import qrcode
 from pyrogram import Client
-from pyrogram.raw.functions.auth import ExportLoginToken, ImportLoginToken
+from pyrogram.raw.functions.account import GetPassword
+from pyrogram.raw.functions.auth import CheckPassword, ExportLoginToken, ImportLoginToken
 from pyrogram.session import Session as PyroSession
 from pyrogram.session.auth import Auth
+from pyrogram.utils import compute_password_check
 from telegram import Update
-from telegram.ext import ContextTypes
+from telegram.ext import ApplicationHandlerStop, ContextTypes
 
 from config import (
     PYROGRAM_API_ID, PYROGRAM_API_HASH, DEBUG_PRINT,
@@ -33,9 +35,10 @@ async def on_disconnect(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     """Обработчик команды /disconnect — отключает аккаунт."""
     u = update.effective_user
     is_active = pyrogram_client.is_active(u.id)
+    had_pending_2fa = await _cancel_pending_2fa(u.id)
 
     if DEBUG_PRINT:
-        print(f"{get_timestamp()} [BOT] /disconnect from user {u.id} (@{u.username})")
+        print(f"{get_timestamp()} [BOT] /disconnect from user {u.id} (@{u.username}, lang={u.language_code})")
 
     if is_active:
         stopped = await pyrogram_client.stop_listening(u.id)
@@ -52,7 +55,7 @@ async def on_disconnect(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         await update.message.reply_text(msg)
         return
 
-    if not is_active:
+    if not is_active and not had_pending_2fa:
         msg = await get_system_message(u.language_code, "status_disconnected")
         await update.message.reply_text(msg)
         return
@@ -70,7 +73,7 @@ async def on_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     u = update.effective_user
 
     if DEBUG_PRINT:
-        print(f"{get_timestamp()} [BOT] /status from user {u.id} (@{u.username})")
+        print(f"{get_timestamp()} [BOT] /status from user {u.id} (@{u.username}, lang={u.language_code})")
 
     if pyrogram_client.is_active(u.id):
         msg = await get_system_message(u.language_code, "status_connected")
@@ -84,6 +87,21 @@ async def on_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 _qr_login_tasks: dict[int, asyncio.Task] = {}
 
+# Ожидающие 2FA-пароля: {user_id: {client, language_code, bot, chat_id}}
+_pending_2fa: dict[int, dict] = {}
+
+
+def _get_chat_type(update: Update) -> str | None:
+    """Возвращает тип чата Telegram как строку."""
+    chat = update.effective_chat
+    chat_type = getattr(chat, "type", None)
+    return getattr(chat_type, "value", chat_type)
+
+
+def _has_pending_2fa(user_id: int) -> bool:
+    """Проверяет, ожидается ли у пользователя ввод 2FA-пароля."""
+    return user_id in _pending_2fa
+
 
 def _get_qr_login_task(user_id: int) -> asyncio.Task | None:
     """Возвращает активную QR-задачу пользователя."""
@@ -92,6 +110,19 @@ def _get_qr_login_task(user_id: int) -> asyncio.Task | None:
         _qr_login_tasks.pop(user_id, None)
         return None
     return task
+
+
+async def _cancel_pending_2fa(user_id: int) -> bool:
+    """Отменяет незавершённый 2FA-логин и очищает временный клиент."""
+    pending = _pending_2fa.pop(user_id, None)
+    if pending is None:
+        return False
+
+    client = pending.get("client")
+    if client is not None:
+        await _safe_disconnect_temp_client(client, user_id)
+
+    return True
 
 
 def _register_qr_login_task(user_id: int, task: asyncio.Task) -> None:
@@ -121,7 +152,7 @@ async def on_connect(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     client: Client | None = None
 
     if DEBUG_PRINT:
-        print(f"{get_timestamp()} [BOT] /connect from user {u.id} (@{u.username})")
+        print(f"{get_timestamp()} [BOT] /connect from user {u.id} (@{u.username}, lang={u.language_code})")
 
     # Проверяем, не подключён ли уже
     if pyrogram_client.is_active(u.id):
@@ -130,6 +161,11 @@ async def on_connect(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         return
 
     if _get_qr_login_task(u.id) is not None:
+        msg = await get_system_message(u.language_code, "connect_in_progress")
+        await update.message.reply_text(msg)
+        return
+
+    if _has_pending_2fa(u.id):
         msg = await get_system_message(u.language_code, "connect_in_progress")
         await update.message.reply_text(msg)
         return
@@ -264,9 +300,17 @@ async def _poll_qr_login(client, user_id: int, language_code: str, bot, chat_id:
             except Exception as e:
                 type_name = type(e).__name__
                 if "SessionPasswordNeeded" in type_name:
-                    msg = await get_system_message(language_code, "connect_2fa_error")
+                    # Сохраняем клиент для ожидания пароля
+                    _pending_2fa[user_id] = {
+                        "client": client,
+                        "language_code": language_code,
+                        "bot": bot,
+                        "chat_id": chat_id,
+                    }
+                    msg = await get_system_message(language_code, "connect_2fa_prompt")
                     await bot.send_message(chat_id=chat_id, text=msg)
-                    return
+                    print(f"{get_timestamp()} [CONNECT_QR] 2FA required for user {user_id}, waiting for password")
+                    return  # НЕ отключаем client — он нужен для check_password
                 if "Unauthorized" in str(e):
                     if DEBUG_PRINT:
                         print(f"{get_timestamp()} [CONNECT_QR] Waiting for scan (user {user_id}): {e}")
@@ -305,7 +349,95 @@ async def _poll_qr_login(client, user_id: int, language_code: str, bot, chat_id:
         msg = await get_system_message(language_code, "connect_error")
         await bot.send_message(chat_id=chat_id, text=msg)
     finally:
-        await _safe_disconnect_temp_client(client, user_id)
+        # Не отключаем клиент, если он передан в _pending_2fa (ожидает 2FA-пароль)
+        if user_id not in _pending_2fa:
+            await _safe_disconnect_temp_client(client, user_id)
+
+
+async def handle_2fa_password(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Обработчик ввода 2FA-пароля после QR-сканирования."""
+    u = update.effective_user
+    pending = _pending_2fa.pop(u.id, None)
+
+    if pending is None:
+        return  # Нет ожидающей 2FA-сессии — пропускаем, on_text обработает
+
+    client: Client = pending["client"]
+    language_code = pending["language_code"]
+    password = update.message.text
+
+    # Удаляем сообщение с паролем из чата для безопасности
+    try:
+        await update.message.delete()
+    except Exception:
+        pass  # Бот может не иметь прав на удаление
+
+    try:
+        # Получаем SRP-параметры через MTProto
+        pwd = await client.invoke(GetPassword())
+
+        # Compute SRP check via Pyrogram
+        r = await client.invoke(
+            CheckPassword(
+                password=compute_password_check(pwd, password),
+            )
+        )
+
+        print(f"{get_timestamp()} [CONNECT_QR] 2FA password accepted for user {u.id}")
+
+        # Сохраняем данные авторизации
+        user_obj = getattr(r, "user", None)
+        if user_obj:
+            await client.storage.user_id(user_obj.id)
+            await client.storage.is_bot(getattr(user_obj, "bot", False))
+
+        # Получаем session string
+        session_string = await client.export_session_string()
+
+        # Сохраняем в БД и запускаем слушатель
+        saved = await save_session(u.id, session_string)
+        if not saved:
+            msg = await get_system_message(language_code, "connect_error")
+            await context.bot.send_message(chat_id=update.effective_chat.id, text=msg)
+            raise ApplicationHandlerStop
+
+        started = await pyrogram_client.start_listening(u.id, session_string)
+        if not started:
+            await clear_session(u.id)
+            msg = await get_system_message(language_code, "connect_error")
+            await context.bot.send_message(chat_id=update.effective_chat.id, text=msg)
+            raise ApplicationHandlerStop
+
+        msg = await get_system_message(language_code, "connect_success")
+        await context.bot.send_message(chat_id=update.effective_chat.id, text=msg)
+        print(f"{get_timestamp()} [BOT] User {u.id} connected via QR code + 2FA")
+
+    except ApplicationHandlerStop:
+        raise  # Пробрасываем дальше
+
+    except Exception as e:
+        error_name = type(e).__name__
+
+        if "PasswordHashInvalid" in error_name:
+            # Неправильный пароль — даём попробовать ещё раз (не отключаем клиент)
+            print(f"{get_timestamp()} [CONNECT_QR] Wrong 2FA password for user {u.id}")
+            _pending_2fa[u.id] = pending  # Возвращаем в ожидание
+            msg = await get_system_message(language_code, "connect_2fa_wrong_password")
+            await context.bot.send_message(chat_id=update.effective_chat.id, text=msg)
+            raise ApplicationHandlerStop
+
+        print(f"{get_timestamp()} [CONNECT_QR] 2FA error for user {u.id}: {e}")
+        traceback.print_exc()
+        msg = await get_system_message(language_code, "connect_2fa_error")
+        await context.bot.send_message(chat_id=update.effective_chat.id, text=msg)
+    finally:
+        # Не отключаем клиент, если он вернулся в _pending_2fa (повтор пароля)
+        if u.id not in _pending_2fa:
+            await _safe_disconnect_temp_client(client, u.id)
+
+    # Останавливаем обработку — on_text НЕ должен видеть пароль.
+    # Happy path тоже попадает сюда: пароль не должен дойти до on_text.
+    raise ApplicationHandlerStop
 
 
 # ====== PYROGRAM CALLBACK ======

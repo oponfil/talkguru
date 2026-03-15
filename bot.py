@@ -24,10 +24,12 @@ from utils.utils import get_timestamp  # noqa: E402
 from clients import pyrogram_client  # noqa: E402
 from handlers.bot_handlers import on_start, on_text  # noqa: E402
 from handlers.pyrogram_handlers import (  # noqa: E402
-    on_disconnect, on_connect, on_status,
+    on_disconnect, on_connect, on_status, handle_2fa_password,
     on_pyrogram_message, on_pyrogram_draft,
 )
 from utils.pyrogram_utils import restore_sessions  # noqa: E402
+
+PRIVATE_ONLY_FILTER = filters.ChatType.PRIVATE
 
 
 # ====== ОБРАБОТЧИК ОШИБОК ======
@@ -56,11 +58,12 @@ def main() -> None:
     app = Application.builder().token(BOT_TOKEN).read_timeout(BOT_READ_TIMEOUT).post_init(post_init).build()
 
     # Регистрируем обработчики
-    app.add_handler(CommandHandler("start", on_start))
-    app.add_handler(CommandHandler("connect", on_connect))
-    app.add_handler(CommandHandler("disconnect", on_disconnect))
-    app.add_handler(CommandHandler("status", on_status))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text))
+    app.add_handler(CommandHandler("start", on_start, filters=PRIVATE_ONLY_FILTER))
+    app.add_handler(CommandHandler("connect", on_connect, filters=PRIVATE_ONLY_FILTER))
+    app.add_handler(CommandHandler("disconnect", on_disconnect, filters=PRIVATE_ONLY_FILTER))
+    app.add_handler(CommandHandler("status", on_status, filters=PRIVATE_ONLY_FILTER))
+    app.add_handler(MessageHandler(PRIVATE_ONLY_FILTER & filters.TEXT & ~filters.COMMAND, handle_2fa_password), group=0)
+    app.add_handler(MessageHandler(PRIVATE_ONLY_FILTER & filters.TEXT & ~filters.COMMAND, on_text), group=1)
 
     # Глобальный обработчик ошибок
     app.add_error_handler(on_error)

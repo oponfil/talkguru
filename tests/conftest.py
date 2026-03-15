@@ -71,10 +71,12 @@ def mock_update(mock_user):
     update.effective_user = mock_user
     update.effective_chat = MagicMock()
     update.effective_chat.id = 123456
+    update.effective_chat.type = "private"
     update.message = AsyncMock()
     update.message.text = "Hello"
     update.message.reply_text = AsyncMock()
     update.message.reply_photo = AsyncMock()
+    update.message.delete = AsyncMock()
     return update
 
 
@@ -84,4 +86,5 @@ def mock_context(mock_bot):
     context = MagicMock()
     context.bot = mock_bot
     context.user_data = {}
+    context.chat_data = {}
     return context

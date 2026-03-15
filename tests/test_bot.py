@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+import bot as bot_module
 from handlers.bot_handlers import on_start, on_text
 from bot import on_error
 
@@ -95,6 +96,33 @@ class TestOnText:
         mock_update.message.reply_text.assert_called_with("Ответ")
 
     @pytest.mark.asyncio
+    async def test_passes_recent_history_to_model(self, mock_update, mock_context):
+        """Передаёт в модель только последние сообщения из chat_data."""
+        mock_update.message.text = "Новый вопрос"
+        mock_context.chat_data["history"] = [
+            {"role": "user", "content": "u1"},
+            {"role": "assistant", "content": "a1"},
+            {"role": "user", "content": "u2"},
+        ]
+
+        with patch("handlers.bot_handlers.MAX_CONTEXT_MESSAGES", 2), \
+             patch("handlers.bot_handlers.update_last_msg_at", new_callable=AsyncMock), \
+             patch("handlers.bot_handlers.generate_response", new_callable=AsyncMock, return_value="Ответ") as mock_generate:
+            await on_text(mock_update, mock_context)
+
+        mock_generate.assert_called_once_with(
+            "Новый вопрос",
+            chat_history=[
+                {"role": "assistant", "content": "a1"},
+                {"role": "user", "content": "u2"},
+            ],
+        )
+        assert mock_context.chat_data["history"] == [
+            {"role": "user", "content": "Новый вопрос"},
+            {"role": "assistant", "content": "Ответ"},
+        ]
+
+    @pytest.mark.asyncio
     async def test_error_sends_error_message(self, mock_update, mock_context):
         """Ошибка генерации → отправляет error message."""
         mock_update.message.text = "Test"
@@ -130,3 +158,42 @@ class TestOnError:
 
         # Не должно бросить исключение
         await on_error(MagicMock(), mock_context)
+
+
+class TestMain:
+    """Тесты для main()."""
+
+    def test_registers_handlers_for_private_chats_only(self):
+        fake_builder = MagicMock()
+        fake_app = MagicMock()
+
+        fake_builder.token.return_value = fake_builder
+        fake_builder.read_timeout.return_value = fake_builder
+        fake_builder.post_init.return_value = fake_builder
+        fake_builder.build.return_value = fake_app
+
+        command_handlers = []
+        message_handlers = []
+
+        def command_handler_stub(*args, **kwargs):
+            command_handlers.append((args, kwargs))
+            return MagicMock()
+
+        def message_handler_stub(*args, **kwargs):
+            message_handlers.append((args, kwargs))
+            return MagicMock()
+
+        with patch("bot.Application.builder", return_value=fake_builder), \
+             patch("bot.CommandHandler", side_effect=command_handler_stub), \
+             patch("bot.MessageHandler", side_effect=message_handler_stub), \
+             patch("bot.pyrogram_client") as mock_pc:
+            bot_module.main()
+
+        assert len(command_handlers) == 4
+        assert len(message_handlers) == 2
+        assert all(kwargs["filters"] is bot_module.PRIVATE_ONLY_FILTER for _, kwargs in command_handlers)
+        assert "ChatType.PRIVATE" in repr(message_handlers[0][0][0])
+        assert "ChatType.PRIVATE" in repr(message_handlers[1][0][0])
+        mock_pc.set_message_callback.assert_called_once()
+        mock_pc.set_draft_callback.assert_called_once()
+        fake_app.run_polling.assert_called_once_with(drop_pending_updates=True)

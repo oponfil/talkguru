@@ -5,7 +5,7 @@ import traceback
 from telegram import Update
 from telegram.ext import ContextTypes
 
-from config import DEBUG_PRINT
+from config import DEBUG_PRINT, MAX_CONTEXT_MESSAGES
 from utils.utils import get_timestamp, typing_action
 from utils.bot_utils import update_menu_language
 from clients.x402gate.openrouter import generate_response
@@ -59,18 +59,32 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not message_text.strip():
         return
 
-    if DEBUG_PRINT:
-        print(
-            f"{get_timestamp()} [BOT] Text from user {u.id}: "
-            f"{len(message_text)} chars"
-        )
-
     # Обновляем last_msg_at
     await update_last_msg_at(u.id)
 
+    # История сообщений в чате с ботом (хранится в context.chat_data)
+    history: list[dict] = context.chat_data.setdefault("history", [])
+
+    if DEBUG_PRINT:
+        print(
+            f"{get_timestamp()} [BOT] Text from user {u.id}: "
+            f"{len(message_text)} chars, history: {len(history)} messages"
+        )
+
     try:
-        # Генерируем ответ через OpenRouter
-        response_text = await generate_response(message_text)
+        # Генерируем ответ через OpenRouter с историей
+        response_text = await generate_response(
+            message_text,
+            chat_history=history[-MAX_CONTEXT_MESSAGES:],
+        )
+
+        # Сохраняем в историю
+        history.append({"role": "user", "content": message_text})
+        history.append({"role": "assistant", "content": response_text})
+
+        # Обрезаем историю, чтобы не разрастался
+        if len(history) > MAX_CONTEXT_MESSAGES:
+            del history[: len(history) - MAX_CONTEXT_MESSAGES]
 
         # Отправляем ответ
         await m.reply_text(response_text)

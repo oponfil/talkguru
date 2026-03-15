@@ -56,6 +56,7 @@ async def generate_response(
     model: str = LLM_MODEL,
     system_prompt: str | None = BOT_PROMPT,
     reasoning_effort: str = "medium",
+    chat_history: list[dict] | None = None,
 ) -> str:
     """Генерирует ответ на сообщение пользователя через OpenRouter.
 
@@ -64,6 +65,7 @@ async def generate_response(
         model: Модель OpenRouter (по умолчанию LLM_MODEL из config)
         system_prompt: Системный промпт (None — без системного промпта)
         reasoning_effort: Уровень reasoning (minimal/low/medium/high)
+        chat_history: Предыдущие сообщения [{"role": "user"/"assistant", "content": "..."}]
 
     Returns:
         Текстовый ответ модели
@@ -82,6 +84,8 @@ async def generate_response(
     messages = []
     if system_prompt:
         messages.append({"role": "system", "content": system_prompt})
+    if chat_history:
+        messages.extend(chat_history)
     messages.append({"role": "user", "content": user_message})
 
     payload = {
@@ -121,7 +125,8 @@ async def generate_response(
             usage = result.get("usage", {}) or {}
             input_tokens = usage.get("prompt_tokens", 0) or 0
             output_tokens = usage.get("completion_tokens", 0) or 0
-            reasoning_tokens = usage.get("reasoning_tokens", 0) or 0
+            completion_details = usage.get("completion_tokens_details") or {}
+            reasoning_tokens = completion_details.get("reasoning_tokens", 0) or 0
             duration = time.time() - start_time
 
             token_info = f"tokens: {input_tokens} → {output_tokens}"

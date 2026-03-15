@@ -3,11 +3,14 @@
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from telegram.ext import ApplicationHandlerStop
 
 from handlers.pyrogram_handlers import (
     _bot_drafts,
+    _pending_2fa,
     _pending_drafts,
     _poll_qr_login,
+    handle_2fa_password,
     on_disconnect,
     on_connect,
     on_pyrogram_draft,
@@ -18,6 +21,18 @@ from system_messages import SYSTEM_MESSAGES
 from utils.bot_utils import update_menu_language
 
 TYPING_TEXT = SYSTEM_MESSAGES["draft_typing"]
+
+
+@pytest.fixture(autouse=True)
+def cleanup_handler_state():
+    """Очищает глобальное состояние обработчиков между тестами."""
+    _bot_drafts.clear()
+    _pending_drafts.clear()
+    _pending_2fa.clear()
+    yield
+    _bot_drafts.clear()
+    _pending_drafts.clear()
+    _pending_2fa.clear()
 
 
 class TestOnDisconnect:
@@ -83,6 +98,26 @@ class TestOnDisconnect:
             await on_disconnect(mock_update, mock_context)
 
         mock_update.message.reply_text.assert_called_once_with("Disconnect failed")
+
+    @pytest.mark.asyncio
+    async def test_disconnect_cancels_pending_2fa(self, mock_update, mock_context):
+        temp_client = AsyncMock()
+        _pending_2fa[mock_update.effective_user.id] = {
+            "client": temp_client,
+            "language_code": "en",
+            "chat_id": mock_update.effective_chat.id,
+        }
+
+        with patch("handlers.pyrogram_handlers.pyrogram_client") as mock_pc, \
+             patch("handlers.pyrogram_handlers.clear_session", new_callable=AsyncMock, return_value=True), \
+             patch("handlers.pyrogram_handlers.get_system_message", new_callable=AsyncMock, return_value="Disconnected"):
+            mock_pc.is_active.return_value = False
+
+            await on_disconnect(mock_update, mock_context)
+
+        temp_client.disconnect.assert_called_once()
+        assert mock_update.effective_user.id not in _pending_2fa
+        mock_update.message.reply_text.assert_called_once_with("Disconnected")
 
 
 class TestOnStatus:
@@ -155,6 +190,23 @@ class TestOnConnect:
     async def test_connect_rejects_when_qr_login_already_running(self, mock_update, mock_context):
         with patch("handlers.pyrogram_handlers.pyrogram_client") as mock_pc, \
              patch("handlers.pyrogram_handlers._get_qr_login_task", return_value=MagicMock()), \
+             patch("handlers.pyrogram_handlers.get_system_message", new_callable=AsyncMock, return_value="In progress"):
+            mock_pc.is_active.return_value = False
+
+            await on_connect(mock_update, mock_context)
+
+        mock_update.message.reply_text.assert_called_once_with("In progress")
+
+    @pytest.mark.asyncio
+    async def test_connect_rejects_when_waiting_for_2fa_password(self, mock_update, mock_context):
+        _pending_2fa[mock_update.effective_user.id] = {
+            "client": AsyncMock(),
+            "language_code": "en",
+            "chat_id": mock_update.effective_chat.id,
+        }
+
+        with patch("handlers.pyrogram_handlers.pyrogram_client") as mock_pc, \
+             patch("handlers.pyrogram_handlers._get_qr_login_task", return_value=None), \
              patch("handlers.pyrogram_handlers.get_system_message", new_callable=AsyncMock, return_value="In progress"):
             mock_pc.is_active.return_value = False
 
@@ -299,6 +351,88 @@ class TestOnPyrogramMessage:
         assert mock_pc.set_draft.call_count == 2
         mock_pc.set_draft.assert_any_call(123, 456, TYPING_TEXT)
         mock_pc.set_draft.assert_any_call(123, 456, "Hi there!")
+
+
+class TestHandle2FAPassword:
+    """Тесты для handle_2fa_password()."""
+
+    @pytest.mark.asyncio
+    async def test_ignores_users_without_pending_2fa(self, mock_update, mock_context):
+        await handle_2fa_password(mock_update, mock_context)
+
+        mock_update.message.delete.assert_not_called()
+        mock_context.bot.send_message.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_wrong_password_keeps_pending_2fa_session(self, mock_update, mock_context):
+        temp_client = AsyncMock()
+
+        class PasswordHashInvalid(Exception):
+            pass
+
+        temp_client.invoke = AsyncMock(side_effect=[MagicMock(), PasswordHashInvalid()])
+
+        _pending_2fa[mock_update.effective_user.id] = {
+            "client": temp_client,
+            "language_code": "en",
+            "chat_id": mock_update.effective_chat.id,
+        }
+
+        with patch("handlers.pyrogram_handlers.GetPassword", return_value="get-password"), \
+             patch("handlers.pyrogram_handlers.CheckPassword", side_effect=lambda password: ("check-password", password)), \
+             patch("handlers.pyrogram_handlers.compute_password_check", return_value="srp-check"), \
+             patch("handlers.pyrogram_handlers.get_system_message", new_callable=AsyncMock, return_value="Wrong password"):
+            with pytest.raises(ApplicationHandlerStop):
+                await handle_2fa_password(mock_update, mock_context)
+
+        assert _pending_2fa[mock_update.effective_user.id]["client"] is temp_client
+        mock_update.message.delete.assert_called_once()
+        mock_context.bot.send_message.assert_called_once_with(
+            chat_id=mock_update.effective_chat.id,
+            text="Wrong password",
+        )
+        temp_client.disconnect.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_successful_password_flow_saves_session_and_starts_listener(self, mock_update, mock_context):
+        temp_client = AsyncMock()
+        temp_client.storage.user_id = AsyncMock()
+        temp_client.storage.is_bot = AsyncMock()
+        temp_client.export_session_string = AsyncMock(return_value="session-123")
+
+        user_obj = MagicMock()
+        user_obj.id = 777
+        user_obj.bot = False
+        auth_result = MagicMock()
+        auth_result.user = user_obj
+        temp_client.invoke = AsyncMock(side_effect=[MagicMock(), auth_result])
+
+        _pending_2fa[mock_update.effective_user.id] = {
+            "client": temp_client,
+            "language_code": "en",
+            "chat_id": mock_update.effective_chat.id,
+        }
+
+        with patch("handlers.pyrogram_handlers.GetPassword", return_value="get-password"), \
+             patch("handlers.pyrogram_handlers.CheckPassword", side_effect=lambda password: ("check-password", password)), \
+             patch("handlers.pyrogram_handlers.compute_password_check", return_value="srp-check"), \
+             patch("handlers.pyrogram_handlers.save_session", new_callable=AsyncMock, return_value=True) as mock_save, \
+             patch("handlers.pyrogram_handlers.pyrogram_client") as mock_pc, \
+             patch("handlers.pyrogram_handlers.get_system_message", new_callable=AsyncMock, return_value="Connected"):
+            mock_pc.start_listening = AsyncMock(return_value=True)
+
+            with pytest.raises(ApplicationHandlerStop):
+                await handle_2fa_password(mock_update, mock_context)
+
+        mock_update.message.delete.assert_called_once()
+        mock_save.assert_called_once_with(mock_update.effective_user.id, "session-123")
+        mock_pc.start_listening.assert_called_once_with(mock_update.effective_user.id, "session-123")
+        mock_context.bot.send_message.assert_called_once_with(
+            chat_id=mock_update.effective_chat.id,
+            text="Connected",
+        )
+        temp_client.disconnect.assert_called_once()
+        assert mock_update.effective_user.id not in _pending_2fa
 
 
 class TestOnPyrogramDraft:
