@@ -4,6 +4,7 @@ from typing import Optional
 
 from config import DEBUG_PRINT
 from database import run_supabase, supabase
+from utils.session_crypto import decrypt_session_string, encrypt_session_string
 from utils.utils import get_timestamp
 
 
@@ -72,9 +73,10 @@ async def update_tg_rating(user_id: int, rating: Optional[int]) -> None:
 async def save_session(user_id: int, session_string: str) -> None:
     """Сохраняет Pyrogram session string пользователя."""
     try:
+        encrypted_session = encrypt_session_string(session_string)
         await run_supabase(
             lambda: supabase.table("users").upsert(
-                {"user_id": user_id, "session_string": session_string},
+                {"user_id": user_id, "session_string": encrypted_session},
                 on_conflict="user_id",
             ).execute()
         )
@@ -95,7 +97,7 @@ async def get_session(user_id: int) -> Optional[str]:
         )
 
         if result.data and result.data[0].get("session_string"):
-            return result.data[0]["session_string"]
+            return decrypt_session_string(result.data[0]["session_string"])
         return None
     except Exception as e:
         print(f"{get_timestamp()} [DB] ERROR get_session {user_id}: {e}")
@@ -110,7 +112,20 @@ async def get_users_with_sessions() -> list[dict]:
                 "user_id, session_string"
             ).not_.is_("session_string", "null").execute()
         )
-        return result.data or []
+        rows = result.data or []
+        decrypted_rows = []
+        for row in rows:
+            encrypted_session = row.get("session_string")
+            if not encrypted_session:
+                continue
+
+            try:
+                decrypted_row = dict(row)
+                decrypted_row["session_string"] = decrypt_session_string(encrypted_session)
+                decrypted_rows.append(decrypted_row)
+            except ValueError:
+                print(f"{get_timestamp()} [DB] WARNING: corrupted session for user {row.get('user_id')}, skipping")
+        return decrypted_rows
     except Exception as e:
         print(f"{get_timestamp()} [DB] ERROR get_users_with_sessions: {e}")
         return []

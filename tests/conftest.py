@@ -11,6 +11,7 @@ os.environ.setdefault("PYROGRAM_API_ID", "12345")
 os.environ.setdefault("PYROGRAM_API_HASH", "test-api-hash")
 os.environ.setdefault("SUPABASE_URL", "https://test.supabase.co")
 os.environ.setdefault("SUPABASE_KEY", "test-supabase-key")
+os.environ.setdefault("SESSION_ENCRYPTION_KEY", "4ja2VbpR3a1jaTO0A4IQUIHNAGF5uXxdB3rrPcIUWfo=")
 os.environ.setdefault("EVM_PRIVATE_KEY", "0x0000000000000000000000000000000000000000000000000000000000000001")
 os.environ.setdefault("DEBUG_PRINT", "false")
 os.environ["LOG_TO_FILE"] = "false"  # Не создавать лог-файлы в тестах

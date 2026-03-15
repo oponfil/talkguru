@@ -7,6 +7,9 @@ httpx>=0.24.0
 # Переменные окружения
 python-dotenv>=1.0.0
 
+# Криптография
+cryptography>=46.0.3
+
 # БД (Supabase)
 supabase>=2.0.0
 

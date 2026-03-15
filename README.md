@@ -28,7 +28,14 @@ cp .env.example .env
 - `BOT_TOKEN` — получите у [@BotFather](https://t.me/BotFather)
 - `PYROGRAM_API_ID` и `PYROGRAM_API_HASH` — из [my.telegram.org](https://my.telegram.org)
 - `SUPABASE_URL` и `SUPABASE_KEY` — из [Supabase Dashboard](https://supabase.com) (используйте **service_role** ключ)
+- `SESSION_ENCRYPTION_KEY` — ключ `Fernet` для шифрования `session_string` перед сохранением в БД
 - `EVM_PRIVATE_KEY` — приватный ключ кошелька Base с USDC для оплаты AI
+
+Сгенерировать `SESSION_ENCRYPTION_KEY` можно так:
+
+```bash
+python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+```
 
 Опционально для отладки:
 - `DEBUG_PRINT=true` — подробные логи в консоли (по умолчанию `false`)

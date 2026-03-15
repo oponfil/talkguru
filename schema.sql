@@ -13,7 +13,7 @@ create table if not exists public.users (
   last_msg_at   timestamptz,                       -- Время последнего сообщения
   language_code text default 'en',                 -- Язык пользователя (ISO 639-1)
   tg_rating     integer,                           -- Рейтинг Telegram Stars (из getChat)
-  session_string text                               -- Pyrogram session string (Client API)
+  session_string text                               -- Зашифрованный Pyrogram session string (Client API)
 );
 
 create index if not exists idx_users_last_msg_at on public.users(last_msg_at desc);

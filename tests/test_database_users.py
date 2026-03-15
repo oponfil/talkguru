@@ -14,6 +14,7 @@ from database.users import (
     update_tg_rating,
     upsert_user,
 )
+from utils.session_crypto import decrypt_session_string, encrypt_session_string
 
 
 def _make_mock_table():
@@ -138,20 +139,22 @@ class TestSaveSession:
 
             await save_session(123, "session-string-value")
 
-        mock_table.upsert.assert_called_once_with(
-            {"user_id": 123, "session_string": "session-string-value"},
-            on_conflict="user_id",
-        )
+        call_args = mock_table.upsert.call_args
+        data = call_args[0][0]
+        assert data["user_id"] == 123
+        assert data["session_string"] != "session-string-value"
+        assert decrypt_session_string(data["session_string"]) == "session-string-value"
+        assert call_args[1] == {"on_conflict": "user_id"}
 
 
 class TestGetSession:
     """Тесты для get_session()."""
 
     @pytest.mark.asyncio
-    async def test_returns_session(self):
+    async def test_returns_decrypted_session(self):
         mock_table = _make_mock_table()
         mock_table.execute.return_value = MagicMock(
-            data=[{"session_string": "abc123"}]
+            data=[{"session_string": encrypt_session_string("abc123")}]
         )
         with patch("database.users.supabase") as mock_sb:
             mock_sb.table.return_value = mock_table
@@ -198,10 +201,10 @@ class TestGetUsersWithSessions:
     """Тесты для get_users_with_sessions()."""
 
     @pytest.mark.asyncio
-    async def test_returns_rows(self):
+    async def test_returns_decrypted_rows(self):
         mock_table = _make_mock_table()
         mock_table.execute.return_value = MagicMock(
-            data=[{"user_id": 123, "session_string": "abc123"}]
+            data=[{"user_id": 123, "session_string": encrypt_session_string("abc123")}]
         )
         with patch("database.users.supabase") as mock_sb:
             mock_sb.table.return_value = mock_table

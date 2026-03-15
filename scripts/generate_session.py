@@ -55,8 +55,8 @@ async def main():
         session_string = await app.export_session_string()
         print("\n✅ Авторизация успешна!")
         print(f"\nВаш SESSION_STRING:\n\n{session_string}\n")
-        print("Скопируйте эту строку и используйте её для подключения ботом,")
-        print("либо сохраните напрямую в базу данных в поле session_string.")
+        print("Скопируйте эту строку и используйте её только через код приложения.")
+        print("Не сохраняйте SESSION_STRING напрямую в базу данных в открытом виде.")
 
 
 if __name__ == "__main__":

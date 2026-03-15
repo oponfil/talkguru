@@ -73,7 +73,8 @@ async def main():
         print("="*50 + "\n")
         print("📍 Ваш SESSION_STRING:\n")
         print(session_string)
-        print("\nСкопируйте эту строку и вставьте в Supabase.")
+        print("\nИспользуйте эту строку только через код приложения.")
+        print("Не вставляйте SESSION_STRING напрямую в Supabase в открытом виде.")
         
     except Exception as e:
         print(f"\n❌ Ошибка или истекло время: {e}")

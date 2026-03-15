@@ -1,7 +1,9 @@
 # config.py — Константы и настройки TalkGuru
 
 import os
+
 from dotenv import load_dotenv
+
 load_dotenv()
 
 
@@ -25,6 +27,11 @@ SUPABASE_URL = os.getenv("SUPABASE_URL", "")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY", "")
 if not SUPABASE_URL or not SUPABASE_KEY:
     print("⚠️  WARNING: SUPABASE_URL или SUPABASE_KEY не заданы!")
+
+# ====== ШИФРОВАНИЕ СЕССИЙ ======
+SESSION_ENCRYPTION_KEY = os.getenv("SESSION_ENCRYPTION_KEY", "")
+if not SESSION_ENCRYPTION_KEY:
+    print("⚠️  WARNING: SESSION_ENCRYPTION_KEY не задан! Шифрование сессий недоступно.")
 
 # ====== x402gate.io (оплата USDC на Base) ======
 X402GATE_URL = "https://x402gate.io"
