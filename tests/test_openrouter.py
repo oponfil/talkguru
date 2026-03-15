@@ -5,7 +5,8 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from clients.x402gate import NonRetriableRequestError, TopupError
-from clients.x402gate.openrouter import generate_response, generate_reply
+from clients.x402gate.openrouter import generate_response
+from logic.reply import generate_reply
 from prompts import BOT_PROMPT
 
 
@@ -179,7 +180,7 @@ class TestGenerateReply:
             {"role": "other", "text": "Отлично!"},
         ]
 
-        with patch("clients.x402gate.openrouter.generate_response", new_callable=AsyncMock) as mock_gen:
+        with patch("logic.reply.generate_response", new_callable=AsyncMock) as mock_gen:
             mock_gen.return_value = "У меня тоже всё хорошо!"
 
             result = await generate_reply(history)

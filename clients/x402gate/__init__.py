@@ -8,6 +8,7 @@ import traceback
 
 import httpx
 from eth_account import Account
+from eth_account.messages import encode_defunct
 from x402 import PaymentRequired, x402Client
 from x402.mechanisms.evm.exact.client import ExactEvmScheme
 from x402.mechanisms.evm.signers import EthAccountSigner
@@ -248,7 +249,6 @@ class X402GateClient:
         msg = f"x402gate:{sign_path}:{ts}".encode("utf-8")
 
         # EVM подписывает hash сообщения
-        from eth_account.messages import encode_defunct
         signed = self._account.sign_message(encode_defunct(msg))
 
         return {

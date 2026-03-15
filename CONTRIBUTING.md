@@ -89,12 +89,17 @@ ruff check .
 
 **Типы:** `feat`, `fix`, `docs`, `refactor`, `test`, `chore`
 
+### Правило полноты
+❌ Запрещено делать коммит, где `<body>` не описывает **все** изменения.
+✅ Каждый изменённый файл / фича должен быть отражён в `<body>` списком `- ...`.
+
 ### Пример
 ```
 feat(bot): add /start command with greeting message
 
 - Register user in Supabase on first contact
 - Send greeting with bot description
+- Update README with /start usage
 ```
 
 ### PowerShell Workflow

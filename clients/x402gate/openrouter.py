@@ -18,8 +18,8 @@ from config import (
     RETRY_DELAY,
     RETRY_EXPONENTIAL_BASE,
 )
-from prompts import BOT_PROMPT, build_reply_prompt
-from utils.utils import get_timestamp, format_chat_history
+from prompts import BOT_PROMPT
+from utils.utils import get_timestamp
 
 LOG_DIR = "logs"
 
@@ -168,32 +168,3 @@ async def generate_response(
     if last_error:
         raise last_error
     raise RuntimeError("Unexpected error in generate_response")
-
-async def generate_reply(
-    chat_history: list[dict],
-    user_info: dict | None = None,
-    opponent_info: dict | None = None,
-    model: str | None = None,
-    custom_prompt: str = "",
-) -> str:
-    """Генерирует ответ на основе контекста переписки.
-
-    Args:
-        chat_history: Список сообщений [{role, text, date?, name?}]
-        user_info: Полная информация о пользователе (из БД)
-        opponent_info: Информация об оппоненте (из Pyrogram)
-        model: Модель OpenRouter (None — используется LLM_MODEL по умолчанию)
-        custom_prompt: Пользовательский промпт из настроек
-
-    Returns:
-        Текст ответа от лица пользователя
-    """
-    history_text = format_chat_history(chat_history, user_info, opponent_info)
-
-    kwargs: dict = {
-        "user_message": history_text,
-        "system_prompt": build_reply_prompt(custom_prompt=custom_prompt),
-    }
-    if model:
-        kwargs["model"] = model
-    return await generate_response(**kwargs)

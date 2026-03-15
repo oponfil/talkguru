@@ -403,6 +403,35 @@ class TestOnPyrogramMessage:
         mock_pc.set_draft.assert_any_call(123, 456, TYPING_TEXT)
         mock_pc.set_draft.assert_any_call(123, 456, "Hi there!")
 
+    @pytest.mark.asyncio
+    async def test_invalid_auto_reply_is_treated_as_off(self):
+        """Невалидный auto_reply не должен запускать таймер автоответа."""
+        message = MagicMock()
+        message.text = "Hello"
+        message.outgoing = False
+        message.from_user = MagicMock()
+        message.from_user.is_bot = False
+        message.from_user.first_name = "Test"
+        message.chat = MagicMock()
+        message.chat.id = 456
+        message.chat.type = MagicMock(value="private")
+
+        with patch("handlers.pyrogram_handlers.pyrogram_client") as mock_pc, \
+             patch("handlers.pyrogram_handlers.generate_reply", new_callable=AsyncMock) as mock_gen, \
+             patch("handlers.pyrogram_handlers.get_user_settings", new_callable=AsyncMock, return_value={"auto_reply": 86400}), \
+             patch("handlers.pyrogram_handlers.get_user", new_callable=AsyncMock, return_value={"language_code": "en"}), \
+             patch("handlers.pyrogram_handlers.get_system_message", new_callable=AsyncMock, return_value=TYPING_TEXT), \
+             patch("handlers.pyrogram_handlers._schedule_auto_reply") as mock_schedule:
+            mock_pc.read_chat_history = AsyncMock(return_value=[
+                {"role": "other", "text": "Hello"}
+            ])
+            mock_pc.set_draft = AsyncMock(return_value=True)
+            mock_gen.return_value = "Hi there!"
+
+            await on_pyrogram_message(123, MagicMock(), message)
+
+        mock_schedule.assert_not_called()
+
 
 class TestHandle2FAPassword:
     """Тесты для handle_2fa_password()."""

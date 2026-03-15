@@ -45,11 +45,12 @@ class TestOnSettings:
 
         keyboard = mock_update.message.reply_text.call_args.kwargs["reply_markup"]
         buttons = keyboard.inline_keyboard
-        assert len(buttons) == 4
+        assert len(buttons) == 5
         assert buttons[0][0].text == "✏️ Drafts: ✅ ON"
         assert buttons[1][0].text == "🤖 Model: FREE"
         assert buttons[2][0].text == "📝 Prompt: not set"
-        assert buttons[3][0].text == "⏰ Auto-reply: OFF"
+        assert buttons[3][0].text == "👤 Style: Userlike"
+        assert buttons[4][0].text == "⏰ Auto-reply: OFF"
 
     @pytest.mark.asyncio
     async def test_shows_custom_settings(self, mock_update, mock_context):
@@ -64,6 +65,18 @@ class TestOnSettings:
         buttons = keyboard.inline_keyboard
         assert buttons[0][0].text == "✏️ Drafts: ❌ OFF"
         assert buttons[1][0].text == "🤖 Model: ⭐ PRO"
+
+    @pytest.mark.asyncio
+    async def test_invalid_auto_reply_is_shown_as_off(self, mock_update, mock_context):
+        """Невалидный auto_reply отображается как OFF."""
+        settings = {"auto_reply": 86400}
+        with patch("handlers.settings_handler.get_user_settings", new_callable=AsyncMock, return_value=settings), \
+             patch("handlers.settings_handler.get_system_message", new_callable=AsyncMock, return_value=TITLE), \
+             patch("handlers.settings_handler.get_system_messages", new_callable=AsyncMock, return_value=MESSAGES):
+            await on_settings(mock_update, mock_context)
+
+        keyboard = mock_update.message.reply_text.call_args.kwargs["reply_markup"]
+        assert keyboard.inline_keyboard[4][0].text == "⏰ Auto-reply: OFF"
 
     @pytest.mark.asyncio
     async def test_shows_prompt_preview(self, mock_update, mock_context):
@@ -154,4 +167,19 @@ class TestOnSettingsCallback:
 
         mock_update.assert_called_once_with(mock_callback_update.effective_user.id, {"auto_reply": 60})
         keyboard = mock_callback_update.callback_query.edit_message_text.call_args.kwargs["reply_markup"]
-        assert keyboard.inline_keyboard[3][0].text == "⏰ Auto-reply: 1 min"
+        assert keyboard.inline_keyboard[4][0].text == "⏰ Auto-reply: 1 min"
+
+    @pytest.mark.asyncio
+    async def test_cycles_style(self, mock_callback_update, mock_context):
+        """Переключает style по кругу: None → flirt → business → ..."""
+        mock_callback_update.callback_query.data = "settings:style"
+
+        with patch("handlers.settings_handler.get_user_settings", new_callable=AsyncMock,
+                    side_effect=[{}, {"style": "flirt"}]), \
+             patch("handlers.settings_handler.update_user_settings", new_callable=AsyncMock, return_value=True) as mock_update, \
+             patch("handlers.settings_handler.get_system_messages", new_callable=AsyncMock, return_value=MESSAGES):
+            await on_settings_callback(mock_callback_update, mock_context)
+
+        mock_update.assert_called_once_with(mock_callback_update.effective_user.id, {"style": "flirt"})
+        keyboard = mock_callback_update.callback_query.edit_message_text.call_args.kwargs["reply_markup"]
+        assert keyboard.inline_keyboard[3][0].text == "💋 Style: Flirt Guru"

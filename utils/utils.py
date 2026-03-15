@@ -4,6 +4,8 @@ from datetime import datetime, timezone
 from functools import wraps
 from typing import Callable
 
+from config import AUTO_REPLY_OPTIONS
+
 
 def get_timestamp() -> str:
     """Возвращает текущее время в формате для логов."""
@@ -100,4 +102,9 @@ def format_chat_history(
         parts.append("CHAT HISTORY:\n" + "\n".join(formatted))
 
     return "\n\n".join(parts)
+
+
+def normalize_auto_reply(value: object) -> int | None:
+    """Возвращает валидный auto_reply или None (OFF)."""
+    return value if value in AUTO_REPLY_OPTIONS else None
 

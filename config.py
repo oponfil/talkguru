@@ -83,5 +83,15 @@ AUTO_REPLY_OPTIONS: dict[int | None, str] = {
     300: "settings_auto_5m",
     900: "settings_auto_15m",
     3600: "settings_auto_1h",
-    86400: "settings_auto_24h",
+    57600: "settings_auto_16h",
+}
+
+# ====== СТИЛЬ ОБЩЕНИЯ ======
+# {значение: ключ сообщения} — None = под пользователя (по умолчанию)
+STYLE_OPTIONS: dict[str | None, str] = {
+    None: "settings_style_userlike",
+    "flirt": "settings_style_flirt",
+    "business": "settings_style_business",
+    "sales": "settings_style_sales",
+    "friend": "settings_style_friend",
 }

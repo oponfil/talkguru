@@ -67,7 +67,14 @@ SYSTEM_MESSAGES = {
     "settings_auto_5m": "⏰ Auto-reply: 5 min",
     "settings_auto_15m": "⏰ Auto-reply: 15 min",
     "settings_auto_1h": "⏰ Auto-reply: 1 hour",
-    "settings_auto_24h": "⏰ Auto-reply: 24 hours",
+    "settings_auto_16h": "⏰ Auto-reply: 16 hours",
+
+    # — Settings: Style —
+    "settings_style_userlike": "👤 Style: Userlike",
+    "settings_style_flirt": "💋 Style: Flirt Guru",
+    "settings_style_business": "💼 Style: Business Guru",
+    "settings_style_sales": "💰 Style: Sales Guru",
+    "settings_style_friend": "🍻 Style: Friend Guru",
 }
 
 

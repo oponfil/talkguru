@@ -21,9 +21,10 @@ from config import (
     QR_LOGIN_TIMEOUT_SECONDS, QR_LOGIN_POLL_INTERVAL,
     DRAFT_PROBE_DELAY, LLM_MODEL_PRO,
 )
-from utils.utils import get_timestamp, typing_action, format_chat_history
+from utils.utils import format_chat_history, get_timestamp, normalize_auto_reply, typing_action
 from utils.bot_utils import update_user_menu
-from clients.x402gate.openrouter import generate_reply, generate_response
+from clients.x402gate.openrouter import generate_response
+from logic.reply import generate_reply
 from clients import pyrogram_client
 from database.users import clear_session, get_user, get_user_settings, save_session, upsert_user
 from system_messages import get_system_message
@@ -529,7 +530,8 @@ async def on_pyrogram_message(user_id: int, pyrogram_client_instance, message) -
         if user_settings.get("pro_model"):
             kwargs["model"] = LLM_MODEL_PRO
         custom_prompt = user_settings.get("custom_prompt", "")
-        reply_text = await generate_reply(history, user, opponent_info, custom_prompt=custom_prompt, **kwargs)
+        style = user_settings.get("style")
+        reply_text = await generate_reply(history, user, opponent_info, custom_prompt=custom_prompt, style=style, **kwargs)
         if not reply_text or not reply_text.strip():
             return
 
@@ -542,7 +544,7 @@ async def on_pyrogram_message(user_id: int, pyrogram_client_instance, message) -
         print(f"{get_timestamp()} [PYROGRAM] Reply set as draft for user {user_id} in chat {chat_id}")
 
         # Запускаем таймер автоответа
-        auto_reply = user_settings.get("auto_reply")
+        auto_reply = normalize_auto_reply(user_settings.get("auto_reply"))
         if auto_reply:
             _schedule_auto_reply(user_id, chat_id, ai_text, auto_reply)
 
@@ -694,6 +696,7 @@ async def on_pyrogram_draft(user_id: int, chat_id: int, draft_text: str) -> None
             "system_prompt": build_draft_prompt(
                 has_history=bool(history),
                 custom_prompt=user_settings.get("custom_prompt", ""),
+                style=user_settings.get("style"),
             ),
         }
         if user_settings.get("pro_model"):
@@ -711,7 +714,7 @@ async def on_pyrogram_draft(user_id: int, chat_id: int, draft_text: str) -> None
         print(f"{get_timestamp()} [DRAFT] Response set as draft for user {user_id} in chat {chat_id}")
 
         # Запускаем таймер автоответа
-        auto_reply = user_settings.get("auto_reply")
+        auto_reply = normalize_auto_reply(user_settings.get("auto_reply"))
         if auto_reply:
             _schedule_auto_reply(user_id, chat_id, ai_text, auto_reply)
 

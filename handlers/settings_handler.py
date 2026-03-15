@@ -3,10 +3,10 @@
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
-from config import AUTO_REPLY_OPTIONS, DEBUG_PRINT
+from config import AUTO_REPLY_OPTIONS, DEBUG_PRINT, STYLE_OPTIONS
 from database.users import get_user_settings, update_user_settings
 from system_messages import get_system_message, get_system_messages
-from utils.utils import get_timestamp, typing_action
+from utils.utils import get_timestamp, normalize_auto_reply, typing_action
 
 
 def _build_settings_keyboard(settings: dict, messages: dict) -> InlineKeyboardMarkup:
@@ -18,12 +18,15 @@ def _build_settings_keyboard(settings: dict, messages: dict) -> InlineKeyboardMa
     drafts_label = messages.get("settings_drafts_on") if drafts_enabled else messages.get("settings_drafts_off")
     model_label = messages.get("settings_model_pro") if pro_model else messages.get("settings_model_free")
     prompt_label = messages.get("settings_prompt_set") if has_prompt else messages.get("settings_prompt_empty")
-    auto_label = messages.get(AUTO_REPLY_OPTIONS.get(settings.get("auto_reply"), "settings_auto_off"))
+    auto_reply = normalize_auto_reply(settings.get("auto_reply"))
+    auto_label = messages.get(AUTO_REPLY_OPTIONS.get(auto_reply, "settings_auto_off"))
+    style_label = messages.get(STYLE_OPTIONS.get(settings.get("style"), "settings_style_userlike"))
 
     keyboard = [
         [InlineKeyboardButton(drafts_label, callback_data="settings:drafts")],
         [InlineKeyboardButton(model_label, callback_data="settings:model")],
         [InlineKeyboardButton(prompt_label, callback_data="settings:prompt")],
+        [InlineKeyboardButton(style_label, callback_data="settings:style")],
         [InlineKeyboardButton(auto_label, callback_data="settings:auto_reply")],
     ]
     return InlineKeyboardMarkup(keyboard)
@@ -101,11 +104,20 @@ async def on_settings_callback(update: Update, context: ContextTypes.DEFAULT_TYP
                 print(f"{get_timestamp()} [BOT] Awaiting custom prompt from user {u.id}")
             return
     elif action == "settings:auto_reply":
-        current = settings.get("auto_reply")
+        current = normalize_auto_reply(settings.get("auto_reply"))
         options = list(AUTO_REPLY_OPTIONS)
-        idx = options.index(current) if current in options else 0
+        idx = options.index(current)
         next_value = options[(idx + 1) % len(options)]
         updated = await update_user_settings(u.id, {"auto_reply": next_value})
+        if not updated:
+            await _send_settings_error(query, u.language_code)
+            return
+    elif action == "settings:style":
+        current = settings.get("style")
+        options = list(STYLE_OPTIONS)
+        idx = options.index(current) if current in options else 0
+        next_value = options[(idx + 1) % len(options)]
+        updated = await update_user_settings(u.id, {"style": next_value})
         if not updated:
             await _send_settings_error(query, u.language_code)
             return
