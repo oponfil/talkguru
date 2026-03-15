@@ -463,12 +463,8 @@ async def on_pyrogram_message(user_id: int, pyrogram_client_instance, message) -
 
     chat_id = message.chat.id
 
-    # Проверяем настройку drafts_enabled
+    # Читаем настройки пользователя
     user_settings = await get_user_settings(user_id)
-    if not user_settings.get("drafts_enabled", True):
-        if DEBUG_PRINT:
-            print(f"{get_timestamp()} [PYROGRAM] Drafts disabled for user {user_id}, skipping message")
-        return
 
     if DEBUG_PRINT:
         sender = message.from_user.first_name if message.from_user else "Unknown"

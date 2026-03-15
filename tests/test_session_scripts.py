@@ -2,7 +2,9 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from scripts import generate_session, generate_session_qr
+pytest.importorskip("telethon", reason="telethon not installed")
+
+from scripts import generate_session, generate_session_qr  # noqa: E402
 
 
 class TestGenerateSessionScript:
