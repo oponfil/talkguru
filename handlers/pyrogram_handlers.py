@@ -4,6 +4,7 @@ import asyncio
 import base64
 import io
 import random
+import time
 import traceback
 
 import qrcode
@@ -13,11 +14,12 @@ from pyrogram.raw.functions.auth import CheckPassword, ExportLoginToken, ImportL
 from pyrogram.session import Session as PyroSession
 from pyrogram.session.auth import Auth
 from pyrogram.utils import compute_password_check
-from telegram import Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ApplicationHandlerStop, ContextTypes
 
 from config import (
     PYROGRAM_API_ID, PYROGRAM_API_HASH, DEBUG_PRINT,
+    PHONE_CODE_TIMEOUT_SECONDS,
     QR_LOGIN_TIMEOUT_SECONDS, QR_LOGIN_POLL_INTERVAL,
     DRAFT_PROBE_DELAY, LLM_MODEL_PRO,
 )
@@ -39,6 +41,7 @@ async def on_disconnect(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     u = update.effective_user
     is_active = pyrogram_client.is_active(u.id)
     had_pending_2fa = await _cancel_pending_2fa(u.id)
+    had_pending_phone = await _cancel_pending_phone(u.id)
 
     if DEBUG_PRINT:
         print(f"{get_timestamp()} [BOT] /disconnect from user {u.id} (@{u.username}, lang={u.language_code})")
@@ -58,7 +61,7 @@ async def on_disconnect(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         await update.message.reply_text(msg)
         return
 
-    if not is_active and not had_pending_2fa:
+    if not is_active and not had_pending_2fa and not had_pending_phone:
         msg = await get_system_message(u.language_code, "status_disconnected")
         await update.message.reply_text(msg)
         return
@@ -94,6 +97,10 @@ _qr_login_tasks: dict[int, asyncio.Task] = {}
 # Ожидающие 2FA-пароля: {user_id: {client, language_code, bot, chat_id}}
 _pending_2fa: dict[int, dict] = {}
 
+# Ожидающие phone-логина: {user_id: {state, client, phone_number, phone_code_hash, expires_at, ...}}
+# state: "awaiting_phone" | "awaiting_code" | "awaiting_2fa"
+_pending_phone: dict[int, dict] = {}
+
 
 def _get_chat_type(update: Update) -> str | None:
     """Возвращает тип чата Telegram как строку."""
@@ -105,6 +112,52 @@ def _get_chat_type(update: Update) -> str | None:
 def _has_pending_2fa(user_id: int) -> bool:
     """Проверяет, ожидается ли у пользователя ввод 2FA-пароля."""
     return user_id in _pending_2fa
+
+
+def _next_phone_expiry() -> float:
+    """Возвращает дедлайн для текущего шага phone-flow."""
+    return time.monotonic() + PHONE_CODE_TIMEOUT_SECONDS
+
+
+def _put_pending_phone(user_id: int, pending: dict) -> dict:
+    """Сохраняет phone-flow c обновлённым дедлайном."""
+    pending["expires_at"] = _next_phone_expiry()
+    _pending_phone[user_id] = pending
+    return pending
+
+
+def _get_phone_timeout_message_key(state: str) -> str:
+    """Подбирает сообщение таймаута для состояния phone-flow."""
+    if state == "awaiting_phone":
+        return "connect_phone_timeout"
+    return "connect_code_expired"
+
+
+async def _get_pending_phone(user_id: int) -> dict | None:
+    """Возвращает активный phone-flow, очищая протухшее состояние."""
+    pending = _pending_phone.get(user_id)
+    if pending is None:
+        return None
+
+    expires_at = pending.get("expires_at")
+    if expires_at is None or time.monotonic() < expires_at:
+        return pending
+
+    await _cancel_pending_phone(user_id)
+    return None
+
+
+async def _cancel_pending_phone(user_id: int) -> bool:
+    """Отменяет незавершённый phone-логин и очищает временный клиент."""
+    pending = _pending_phone.pop(user_id, None)
+    if pending is None:
+        return False
+
+    client = pending.get("client")
+    if client is not None:
+        await _safe_disconnect_temp_client(client, user_id)
+
+    return True
 
 
 def _get_qr_login_task(user_id: int) -> asyncio.Task | None:
@@ -151,9 +204,8 @@ async def _safe_disconnect_temp_client(client: Client, user_id: int) -> None:
 
 @typing_action
 async def on_connect(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Обработчик команды /connect — подключение аккаунта через QR-код."""
+    """Обработчик команды /connect — подключение аккаунта (сначала телефон, кнопка QR)."""
     u = update.effective_user
-    client: Client | None = None
 
     if DEBUG_PRINT:
         print(f"{get_timestamp()} [BOT] /connect from user {u.id} (@{u.username}, lang={u.language_code})")
@@ -174,6 +226,11 @@ async def on_connect(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         await update.message.reply_text(msg)
         return
 
+    if await _get_pending_phone(u.id) is not None:
+        msg = await get_system_message(u.language_code, "connect_in_progress")
+        await update.message.reply_text(msg)
+        return
+
     try:
         # /connect должен работать даже без предварительного /start
         await upsert_user(
@@ -186,9 +243,40 @@ async def on_connect(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             language_code=u.language_code,
         )
 
-        # Создаём временного клиента Pyrogram
+        # Регистрируем phone-flow (ожидание номера)
+        _put_pending_phone(u.id, {
+            "state": "awaiting_phone",
+            "language_code": u.language_code,
+            "chat_id": update.effective_chat.id,
+        })
+
+        # Отправляем приглашение ввести номер с кнопкой QR
+        msg = await get_system_message(u.language_code, "connect_phone_prompt")
+        qr_label = await get_system_message(u.language_code, "connect_phone_btn_qr")
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton(qr_label, callback_data="connect:qr")]
+        ])
+        await update.message.reply_text(msg, reply_markup=keyboard)
+
+    except Exception as e:
+        print(f"{get_timestamp()} [BOT] ERROR connect for user {u.id}: {e}")
+        traceback.print_exc()
+        await _cancel_pending_phone(u.id)
+        try:
+            msg = await get_system_message(u.language_code, "connect_error")
+            await update.message.reply_text(msg)
+        except Exception:
+            pass
+
+
+async def _start_qr_flow(
+    user_id: int, language_code: str, bot: object, chat_id: int,
+) -> None:
+    """Запускает QR-flow: создаёт клиент, генерирует QR, запускает polling."""
+    client: Client | None = None
+    try:
         client = Client(
-            name=f"talkguru_qr_{u.id}",
+            name=f"talkguru_qr_{user_id}",
             api_id=int(PYROGRAM_API_ID),
             api_hash=PYROGRAM_API_HASH,
             in_memory=True,
@@ -216,32 +304,327 @@ async def on_connect(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         buf.seek(0)
 
         # Отправляем QR-код пользователю
-        msg = await get_system_message(u.language_code, "connect_scan")
-        await update.message.reply_photo(photo=buf, caption=msg)
+        msg = await get_system_message(language_code, "connect_scan")
+        await bot.send_photo(chat_id=chat_id, photo=buf, caption=msg)
 
         if DEBUG_PRINT:
-            print(f"{get_timestamp()} [CONNECT_QR] QR sent to user {u.id}, waiting for scan...")
+            print(f"{get_timestamp()} [CONNECT_QR] QR sent to user {user_id}, waiting for scan...")
 
-        # Запускаем polling в фоне, чтобы НЕ блокировать бот
+        # Запускаем polling в фоне
         task = asyncio.create_task(
-            _poll_qr_login(
-                client,
-                u.id,
-                u.language_code,
-                context.bot,
-                update.effective_chat.id,
-            )
+            _poll_qr_login(client, user_id, language_code, bot, chat_id)
         )
-        _register_qr_login_task(u.id, task)
+        _register_qr_login_task(user_id, task)
         client = None
 
     except Exception as e:
-        print(f"{get_timestamp()} [BOT] ERROR connect for user {u.id}: {e}")
+        print(f"{get_timestamp()} [BOT] ERROR QR flow for user {user_id}: {e}")
         traceback.print_exc()
-        msg = await get_system_message(u.language_code, "connect_error")
-        await update.message.reply_text(msg)
+        msg = await get_system_message(language_code, "connect_error")
+        await bot.send_message(chat_id=chat_id, text=msg)
+        if client is not None:
+            await _safe_disconnect_temp_client(client, user_id)
+
+
+async def on_connect_qr_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Callback кнопки 'QR-код' — переключает на QR-flow."""
+    query = update.callback_query
+    await query.answer()
+
+    u = update.effective_user
+
+    # Отменяем phone-flow
+    await _cancel_pending_phone(u.id)
+
+    # Проверяем, не подключён ли уже
+    if pyrogram_client.is_active(u.id):
+        msg = await get_system_message(u.language_code, "connect_already")
+        await query.edit_message_text(msg)
+        return
+
+    if _get_qr_login_task(u.id) is not None:
+        msg = await get_system_message(u.language_code, "connect_in_progress")
+        await query.edit_message_text(msg)
+        return
+
+    if _has_pending_2fa(u.id):
+        msg = await get_system_message(u.language_code, "connect_in_progress")
+        await query.edit_message_text(msg)
+        return
+
+    await _start_qr_flow(
+        u.id, u.language_code, context.bot, update.effective_chat.id,
+    )
+
+
+# ====== Phone flow text handlers ======
+
+
+async def handle_connect_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Диспетчер текстовых сообщений для phone-flow и QR 2FA."""
+    u = update.effective_user
+
+    # QR 2FA (существующий flow) — приоритет
+    if _has_pending_2fa(u.id):
+        await handle_2fa_password(update, context)
+        return  # handle_2fa_password поднимает ApplicationHandlerStop
+
+    # Phone-flow
+    pending = _pending_phone.get(u.id)
+    if pending is not None:
+        expires_at = pending.get("expires_at")
+        if expires_at is not None and time.monotonic() >= expires_at:
+            await _cancel_pending_phone(u.id)
+            msg = await get_system_message(
+                pending.get("language_code"),
+                _get_phone_timeout_message_key(pending.get("state", "")),
+            )
+            await context.bot.send_message(chat_id=pending.get("chat_id"), text=msg)
+            raise ApplicationHandlerStop
+
+    pending = await _get_pending_phone(u.id)
+    if pending is None:
+        return  # Нет активного flow — пропускаем, on_text обработает
+
+    state = pending["state"]
+    if state == "awaiting_phone":
+        await _handle_phone_number(update, context, pending)
+    elif state == "awaiting_code":
+        await _handle_phone_code(update, context, pending)
+    elif state == "awaiting_2fa":
+        await _handle_phone_2fa(update, context, pending)
+    else:
+        return  # Неизвестное состояние — пропускаем
+
+
+async def _handle_phone_number(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, pending: dict,
+) -> None:
+    """Обработка ввода номера телефона."""
+    u = update.effective_user
+    phone_number = (update.message.text or "").strip()
+    language_code = pending["language_code"]
+
+    # Удаляем сообщение с номером для безопасности
+    try:
+        await update.message.delete()
+    except Exception:
+        pass
+
+    client: Client | None = None
+    try:
+        # Создаём временного клиента Pyrogram
+        client = Client(
+            name=f"talkguru_phone_{u.id}",
+            api_id=int(PYROGRAM_API_ID),
+            api_hash=PYROGRAM_API_HASH,
+            in_memory=True,
+            no_updates=True,
+        )
+        await client.connect()
+
+        # Отправляем код подтверждения
+        sent_code = await client.send_code(phone_number)
+
+        # Переводим в состояние ожидания кода
+        _put_pending_phone(u.id, {
+            "state": "awaiting_code",
+            "client": client,
+            "phone_number": phone_number,
+            "phone_code_hash": sent_code.phone_code_hash,
+            "language_code": language_code,
+            "chat_id": pending["chat_id"],
+        })
+
+        msg = await get_system_message(language_code, "connect_code_prompt")
+        await context.bot.send_message(chat_id=pending["chat_id"], text=msg)
+
+        if DEBUG_PRINT:
+            print(f"{get_timestamp()} [CONNECT_PHONE] Code sent to user {u.id}")
+
+    except Exception as e:
+        error_name = type(e).__name__
+
+        if "PhoneNumberInvalid" in error_name:
+            _put_pending_phone(u.id, pending)
+            msg = await get_system_message(language_code, "connect_phone_invalid")
+            await context.bot.send_message(chat_id=pending["chat_id"], text=msg)
+            # Остаёмся в awaiting_phone — пользователь может ввести повторно
+            if client is not None:
+                await _safe_disconnect_temp_client(client, u.id)
+            raise ApplicationHandlerStop
+
+        if "FloodWait" in error_name:
+            seconds = getattr(e, "value", getattr(e, "x", 0))
+            msg = await get_system_message(language_code, "connect_flood_wait")
+            msg = msg.replace("{seconds}", str(seconds))
+            await context.bot.send_message(chat_id=pending["chat_id"], text=msg)
+            _pending_phone.pop(u.id, None)
+            if client is not None:
+                await _safe_disconnect_temp_client(client, u.id)
+            raise ApplicationHandlerStop
+
+        print(f"{get_timestamp()} [CONNECT_PHONE] ERROR send_code for user {u.id}: {e}")
+        traceback.print_exc()
+        msg = await get_system_message(language_code, "connect_error")
+        await context.bot.send_message(chat_id=pending["chat_id"], text=msg)
+        _pending_phone.pop(u.id, None)
         if client is not None:
             await _safe_disconnect_temp_client(client, u.id)
+
+    raise ApplicationHandlerStop
+
+
+async def _handle_phone_code(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, pending: dict,
+) -> None:
+    """Обработка ввода кода подтверждения."""
+    u = update.effective_user
+    code = (update.message.text or "").strip()
+    client: Client = pending["client"]
+    language_code = pending["language_code"]
+    chat_id = pending["chat_id"]
+
+    # Удаляем сообщение с кодом для безопасности
+    try:
+        await update.message.delete()
+    except Exception:
+        pass
+
+    try:
+        result = await client.sign_in(
+            phone_number=pending["phone_number"],
+            phone_code_hash=pending["phone_code_hash"],
+            phone_code=code,
+        )
+
+        # Успешная авторизация
+        user_obj = getattr(result, "user", result)
+        if hasattr(user_obj, "id"):
+            await client.storage.user_id(user_obj.id)
+            await client.storage.is_bot(getattr(user_obj, "bot", False))
+
+        await _finalize_phone_login(u.id, client, language_code, context.bot, chat_id)
+
+    except Exception as e:
+        error_name = type(e).__name__
+
+        if "SessionPasswordNeeded" in error_name:
+            # 2FA требуется — переводим в awaiting_2fa
+            _put_pending_phone(u.id, {**_pending_phone[u.id], "state": "awaiting_2fa"})
+            msg = await get_system_message(language_code, "connect_2fa_prompt")
+            await context.bot.send_message(chat_id=chat_id, text=msg)
+            if DEBUG_PRINT:
+                print(f"{get_timestamp()} [CONNECT_PHONE] 2FA required for user {u.id}")
+            raise ApplicationHandlerStop
+
+        if "PhoneCodeInvalid" in error_name:
+            _put_pending_phone(u.id, pending)
+            msg = await get_system_message(language_code, "connect_code_invalid")
+            await context.bot.send_message(chat_id=chat_id, text=msg)
+            # Остаёмся в awaiting_code
+            raise ApplicationHandlerStop
+
+        if "PhoneCodeExpired" in error_name:
+            msg = await get_system_message(language_code, "connect_code_expired")
+            await context.bot.send_message(chat_id=chat_id, text=msg)
+            _pending_phone.pop(u.id, None)
+            await _safe_disconnect_temp_client(client, u.id)
+            raise ApplicationHandlerStop
+
+        print(f"{get_timestamp()} [CONNECT_PHONE] ERROR sign_in for user {u.id}: {e}")
+        traceback.print_exc()
+        msg = await get_system_message(language_code, "connect_error")
+        await context.bot.send_message(chat_id=chat_id, text=msg)
+        _pending_phone.pop(u.id, None)
+        await _safe_disconnect_temp_client(client, u.id)
+
+    raise ApplicationHandlerStop
+
+
+async def _handle_phone_2fa(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, pending: dict,
+) -> None:
+    """Обработка ввода 2FA-пароля в phone-flow."""
+    u = update.effective_user
+    password = (update.message.text or "").strip()
+    client: Client = pending["client"]
+    language_code = pending["language_code"]
+    chat_id = pending["chat_id"]
+
+    # Удаляем сообщение с паролем для безопасности
+    try:
+        await update.message.delete()
+    except Exception:
+        pass
+
+    try:
+        # Получаем SRP-параметры и проверяем пароль
+        pwd = await client.invoke(GetPassword())
+        r = await client.invoke(
+            CheckPassword(password=compute_password_check(pwd, password))
+        )
+
+        if DEBUG_PRINT:
+            print(f"{get_timestamp()} [CONNECT_PHONE] 2FA password accepted for user {u.id}")
+
+        user_obj = getattr(r, "user", None)
+        if user_obj:
+            await client.storage.user_id(user_obj.id)
+            await client.storage.is_bot(getattr(user_obj, "bot", False))
+
+        await _finalize_phone_login(u.id, client, language_code, context.bot, chat_id)
+
+    except Exception as e:
+        error_name = type(e).__name__
+
+        if "PasswordHashInvalid" in error_name:
+            print(f"{get_timestamp()} [CONNECT_PHONE] Wrong 2FA password for user {u.id}")
+            _put_pending_phone(u.id, pending)
+            msg = await get_system_message(language_code, "connect_2fa_wrong_password")
+            await context.bot.send_message(chat_id=chat_id, text=msg)
+            # Остаёмся в awaiting_2fa
+            raise ApplicationHandlerStop
+
+        print(f"{get_timestamp()} [CONNECT_PHONE] 2FA error for user {u.id}: {e}")
+        traceback.print_exc()
+        msg = await get_system_message(language_code, "connect_2fa_error")
+        await context.bot.send_message(chat_id=chat_id, text=msg)
+        _pending_phone.pop(u.id, None)
+        await _safe_disconnect_temp_client(client, u.id)
+
+    raise ApplicationHandlerStop
+
+
+async def _finalize_phone_login(
+    user_id: int, client: Client, language_code: str, bot: object, chat_id: int,
+) -> None:
+    """Завершает phone-логин: сохраняет сессию и запускает listener."""
+    try:
+        session_string = await client.export_session_string()
+
+        saved = await save_session(user_id, session_string)
+        if not saved:
+            msg = await get_system_message(language_code, "connect_error")
+            await bot.send_message(chat_id=chat_id, text=msg)
+            return
+
+        started = await pyrogram_client.start_listening(user_id, session_string)
+        if not started:
+            await clear_session(user_id)
+            msg = await get_system_message(language_code, "connect_error")
+            await bot.send_message(chat_id=chat_id, text=msg)
+            return
+
+        msg = await get_system_message(language_code, "connect_success")
+        await bot.send_message(chat_id=chat_id, text=msg)
+        await update_user_menu(bot, user_id, language_code, is_connected=True)
+        if DEBUG_PRINT:
+            print(f"{get_timestamp()} [BOT] User {user_id} connected via phone")
+
+    finally:
+        _pending_phone.pop(user_id, None)
+        await _safe_disconnect_temp_client(client, user_id)
 
 
 async def _poll_qr_login(client, user_id: int, language_code: str, bot, chat_id: int) -> None:

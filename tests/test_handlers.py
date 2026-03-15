@@ -11,8 +11,11 @@ from handlers.pyrogram_handlers import (
     _bot_draft_echoes,
     _pending_2fa,
     _pending_drafts,
+    _pending_phone,
     _poll_qr_login,
     handle_2fa_password,
+    handle_connect_text,
+    on_connect_qr_callback,
     on_disconnect,
     on_connect,
     on_pyrogram_draft,
@@ -33,12 +36,14 @@ def cleanup_handler_state():
     _bot_draft_echoes.clear()
     _pending_drafts.clear()
     _pending_2fa.clear()
+    _pending_phone.clear()
     yield
     _auto_reply_tasks.clear()
     _bot_drafts.clear()
     _bot_draft_echoes.clear()
     _pending_drafts.clear()
     _pending_2fa.clear()
+    _pending_phone.clear()
 
 
 class TestOnDisconnect:
@@ -152,28 +157,12 @@ class TestOnConnect:
     """Тесты для on_connect() и QR login flow."""
 
     @pytest.mark.asyncio
-    async def test_connect_upserts_user_and_starts_background_polling(self, mock_update, mock_context):
-        """`/connect` должен создавать пользователя и запускать polling."""
-        mock_client = AsyncMock()
-        mock_client.invoke = AsyncMock(return_value=MagicMock(token=b"login-token"))
-        mock_client.connect = AsyncMock()
-
-        mock_qr = MagicMock()
-        mock_qr.save = MagicMock()
-        task = MagicMock()
-
-        def create_task_stub(coro):
-            coro.close()
-            return task
-
+    async def test_connect_upserts_user_and_shows_phone_prompt(self, mock_update, mock_context):
+        """`/connect` должен создавать пользователя и показывать phone prompt с кнопкой QR."""
         with patch("handlers.pyrogram_handlers.pyrogram_client") as mock_pc, \
-             patch("handlers.pyrogram_handlers.Client", return_value=mock_client), \
-             patch("handlers.pyrogram_handlers.qrcode.make", return_value=mock_qr), \
              patch("handlers.pyrogram_handlers.upsert_user", new_callable=AsyncMock) as mock_upsert, \
-             patch("handlers.pyrogram_handlers.get_system_message", new_callable=AsyncMock, return_value="Scan QR"), \
-             patch("handlers.pyrogram_handlers._get_qr_login_task", return_value=None), \
-             patch("handlers.pyrogram_handlers.asyncio.create_task", side_effect=create_task_stub) as mock_create_task, \
-             patch("handlers.pyrogram_handlers._register_qr_login_task") as mock_register_task:
+             patch("handlers.pyrogram_handlers.get_system_message", new_callable=AsyncMock, return_value="Enter phone"), \
+             patch("handlers.pyrogram_handlers._get_qr_login_task", return_value=None):
             mock_pc.is_active.return_value = False
 
             await on_connect(mock_update, mock_context)
@@ -187,10 +176,10 @@ class TestOnConnect:
             is_premium=bool(mock_update.effective_user.is_premium),
             language_code=mock_update.effective_user.language_code,
         )
-        mock_client.connect.assert_called_once()
-        mock_update.message.reply_photo.assert_called_once()
-        mock_create_task.assert_called_once()
-        mock_register_task.assert_called_once_with(mock_update.effective_user.id, task)
+        # reply_text вызван с InlineKeyboard (кнопка QR)
+        mock_update.message.reply_text.assert_called_once()
+        assert mock_update.effective_user.id in _pending_phone
+        assert _pending_phone[mock_update.effective_user.id]["state"] == "awaiting_phone"
 
     @pytest.mark.asyncio
     async def test_connect_rejects_when_qr_login_already_running(self, mock_update, mock_context):
@@ -219,6 +208,21 @@ class TestOnConnect:
             await on_connect(mock_update, mock_context)
 
         mock_update.message.reply_text.assert_called_once_with("In progress")
+
+    @pytest.mark.asyncio
+    async def test_connect_clears_pending_phone_when_prompt_setup_fails(self, mock_update, mock_context):
+        """Сбой при показе phone prompt не должен оставлять пользователя в зависшем flow."""
+        user_id = mock_update.effective_user.id
+
+        with patch("handlers.pyrogram_handlers.pyrogram_client") as mock_pc, \
+             patch("handlers.pyrogram_handlers.upsert_user", new_callable=AsyncMock), \
+             patch("handlers.pyrogram_handlers._get_qr_login_task", return_value=None), \
+             patch("handlers.pyrogram_handlers.get_system_message", new_callable=AsyncMock, side_effect=RuntimeError("boom")):
+            mock_pc.is_active.return_value = False
+
+            await on_connect(mock_update, mock_context)
+
+        assert user_id not in _pending_phone
 
     @pytest.mark.asyncio
     async def test_poll_qr_login_success_saves_session_and_starts_listening(self, mock_bot):
@@ -650,3 +654,472 @@ class TestUpdateUserMenu:
             await update_user_menu(mock_bot, 123, None, is_connected=False)
 
         mock_bot.set_my_commands.assert_called_once()
+
+
+class TestConnectPhoneFlow:
+    """Тесты для phone-first connect flow."""
+
+    @pytest.mark.asyncio
+    async def test_connect_sends_phone_prompt_with_qr_button(self, mock_update, mock_context):
+        """`/connect` отправляет сообщение с кнопкой QR."""
+        with patch("handlers.pyrogram_handlers.pyrogram_client") as mock_pc, \
+             patch("handlers.pyrogram_handlers.upsert_user", new_callable=AsyncMock), \
+             patch("handlers.pyrogram_handlers._get_qr_login_task", return_value=None), \
+             patch("handlers.pyrogram_handlers.get_system_message", new_callable=AsyncMock, return_value="Enter phone"):
+            mock_pc.is_active.return_value = False
+
+            await on_connect(mock_update, mock_context)
+
+        # Проверяем: reply_text вызван с reply_markup (InlineKeyboard)
+        mock_update.message.reply_text.assert_called_once()
+        call_kwargs = mock_update.message.reply_text.call_args
+        assert call_kwargs.kwargs.get("reply_markup") is not None or \
+            (len(call_kwargs.args) > 1 and call_kwargs.args[1] is not None) or \
+            "reply_markup" in (call_kwargs.kwargs or {})
+        # Пользователь должен быть зарегистрирован в phone-flow
+        assert mock_update.effective_user.id in _pending_phone
+        assert _pending_phone[mock_update.effective_user.id]["state"] == "awaiting_phone"
+
+    @pytest.mark.asyncio
+    async def test_connect_ignores_expired_phone_flow(self, mock_update, mock_context):
+        """Протухший phone-flow не должен блокировать новый /connect."""
+        user_id = mock_update.effective_user.id
+        temp_client = AsyncMock()
+        _pending_phone[user_id] = {
+            "state": "awaiting_code",
+            "client": temp_client,
+            "phone_number": "+1234567890",
+            "phone_code_hash": "hash123",
+            "language_code": "en",
+            "chat_id": mock_update.effective_chat.id,
+            "expires_at": 1,
+        }
+
+        with patch("handlers.pyrogram_handlers.time.monotonic", return_value=2), \
+             patch("handlers.pyrogram_handlers.pyrogram_client") as mock_pc, \
+             patch("handlers.pyrogram_handlers.upsert_user", new_callable=AsyncMock), \
+             patch("handlers.pyrogram_handlers._get_qr_login_task", return_value=None), \
+             patch("handlers.pyrogram_handlers.get_system_message", new_callable=AsyncMock, return_value="Enter phone"):
+            mock_pc.is_active.return_value = False
+
+            await on_connect(mock_update, mock_context)
+
+        temp_client.disconnect.assert_called_once()
+        assert user_id in _pending_phone
+        assert _pending_phone[user_id]["state"] == "awaiting_phone"
+
+    @pytest.mark.asyncio
+    async def test_phone_number_triggers_send_code(self, mock_update, mock_context):
+        """Ввод валидного номера → send_code() и переход в awaiting_code."""
+        user_id = mock_update.effective_user.id
+        _pending_phone[user_id] = {
+            "state": "awaiting_phone",
+            "language_code": "en",
+            "chat_id": mock_update.effective_chat.id,
+        }
+
+        mock_client = AsyncMock()
+        mock_sent_code = MagicMock()
+        mock_sent_code.phone_code_hash = "hash123"
+        mock_client.send_code = AsyncMock(return_value=mock_sent_code)
+        mock_client.connect = AsyncMock()
+
+        mock_update.message.text = "+1234567890"
+
+        with patch("handlers.pyrogram_handlers.Client", return_value=mock_client), \
+             patch("handlers.pyrogram_handlers.get_system_message", new_callable=AsyncMock, return_value="Enter code"):
+            with pytest.raises(ApplicationHandlerStop):
+                await handle_connect_text(mock_update, mock_context)
+
+        mock_client.send_code.assert_called_once_with("+1234567890")
+        mock_update.message.delete.assert_called_once()
+        assert _pending_phone[user_id]["state"] == "awaiting_code"
+        assert _pending_phone[user_id]["phone_code_hash"] == "hash123"
+
+    @pytest.mark.asyncio
+    async def test_invalid_phone_number_shows_error(self, mock_update, mock_context):
+        """Невалидный номер → ошибка, остаёмся в awaiting_phone."""
+        user_id = mock_update.effective_user.id
+        _pending_phone[user_id] = {
+            "state": "awaiting_phone",
+            "language_code": "en",
+            "chat_id": mock_update.effective_chat.id,
+        }
+
+        class PhoneNumberInvalid(Exception):
+            pass
+
+        mock_client = AsyncMock()
+        mock_client.connect = AsyncMock()
+        mock_client.send_code = AsyncMock(side_effect=PhoneNumberInvalid())
+
+        mock_update.message.text = "invalid"
+
+        with patch("handlers.pyrogram_handlers.Client", return_value=mock_client), \
+             patch("handlers.pyrogram_handlers.get_system_message", new_callable=AsyncMock, return_value="Invalid phone"):
+            with pytest.raises(ApplicationHandlerStop):
+                await handle_connect_text(mock_update, mock_context)
+
+        mock_context.bot.send_message.assert_called_once_with(
+            chat_id=mock_update.effective_chat.id, text="Invalid phone",
+        )
+        # Остаёмся в awaiting_phone
+        assert _pending_phone[user_id]["state"] == "awaiting_phone"
+
+    @pytest.mark.asyncio
+    async def test_phone_code_success_saves_session(self, mock_update, mock_context):
+        """Правильный код → сессия сохранена, подключение."""
+        user_id = mock_update.effective_user.id
+        mock_client = AsyncMock()
+        mock_client.export_session_string = AsyncMock(return_value="session-phone")
+
+        user_obj = MagicMock()
+        user_obj.id = 777
+        user_obj.bot = False
+        auth_result = MagicMock()
+        auth_result.user = user_obj
+        mock_client.sign_in = AsyncMock(return_value=auth_result)
+        mock_client.storage.user_id = AsyncMock()
+        mock_client.storage.is_bot = AsyncMock()
+
+        _pending_phone[user_id] = {
+            "state": "awaiting_code",
+            "client": mock_client,
+            "phone_number": "+1234567890",
+            "phone_code_hash": "hash123",
+            "language_code": "en",
+            "chat_id": mock_update.effective_chat.id,
+        }
+
+        mock_update.message.text = "12345"
+
+        with patch("handlers.pyrogram_handlers.save_session", new_callable=AsyncMock, return_value=True) as mock_save, \
+             patch("handlers.pyrogram_handlers.pyrogram_client") as mock_pc, \
+             patch("handlers.pyrogram_handlers.get_system_message", new_callable=AsyncMock, return_value="Connected"):
+            mock_pc.start_listening = AsyncMock(return_value=True)
+
+            with pytest.raises(ApplicationHandlerStop):
+                await handle_connect_text(mock_update, mock_context)
+
+        mock_save.assert_called_once_with(user_id, "session-phone")
+        mock_pc.start_listening.assert_called_once_with(user_id, "session-phone")
+        assert user_id not in _pending_phone
+
+    @pytest.mark.asyncio
+    async def test_phone_code_invalid_shows_error(self, mock_update, mock_context):
+        """Неправильный код → ошибка, остаёмся в awaiting_code."""
+        user_id = mock_update.effective_user.id
+        mock_client = AsyncMock()
+
+        class PhoneCodeInvalid(Exception):
+            pass
+
+        mock_client.sign_in = AsyncMock(side_effect=PhoneCodeInvalid())
+
+        _pending_phone[user_id] = {
+            "state": "awaiting_code",
+            "client": mock_client,
+            "phone_number": "+1234567890",
+            "phone_code_hash": "hash123",
+            "language_code": "en",
+            "chat_id": mock_update.effective_chat.id,
+        }
+
+        mock_update.message.text = "99999"
+
+        with patch("handlers.pyrogram_handlers.get_system_message", new_callable=AsyncMock, return_value="Invalid code"):
+            with pytest.raises(ApplicationHandlerStop):
+                await handle_connect_text(mock_update, mock_context)
+
+        mock_context.bot.send_message.assert_called_once_with(
+            chat_id=mock_update.effective_chat.id, text="Invalid code",
+        )
+        # Остаёмся в awaiting_code
+        assert _pending_phone[user_id]["state"] == "awaiting_code"
+
+    @pytest.mark.asyncio
+    async def test_phone_code_expired_shows_error(self, mock_update, mock_context):
+        """Истёкший код → ошибка, flow отменяется."""
+        user_id = mock_update.effective_user.id
+        mock_client = AsyncMock()
+
+        class PhoneCodeExpired(Exception):
+            pass
+
+        mock_client.sign_in = AsyncMock(side_effect=PhoneCodeExpired())
+
+        _pending_phone[user_id] = {
+            "state": "awaiting_code",
+            "client": mock_client,
+            "phone_number": "+1234567890",
+            "phone_code_hash": "hash123",
+            "language_code": "en",
+            "chat_id": mock_update.effective_chat.id,
+        }
+
+        mock_update.message.text = "12345"
+
+        with patch("handlers.pyrogram_handlers.get_system_message", new_callable=AsyncMock, return_value="Code expired"):
+            with pytest.raises(ApplicationHandlerStop):
+                await handle_connect_text(mock_update, mock_context)
+
+        mock_context.bot.send_message.assert_called_once_with(
+            chat_id=mock_update.effective_chat.id, text="Code expired",
+        )
+        assert user_id not in _pending_phone
+
+    @pytest.mark.asyncio
+    async def test_phone_2fa_prompt_on_password_needed(self, mock_update, mock_context):
+        """SessionPasswordNeeded → prompt 2FA."""
+        user_id = mock_update.effective_user.id
+        mock_client = AsyncMock()
+
+        class SessionPasswordNeeded(Exception):
+            pass
+
+        mock_client.sign_in = AsyncMock(side_effect=SessionPasswordNeeded())
+
+        _pending_phone[user_id] = {
+            "state": "awaiting_code",
+            "client": mock_client,
+            "phone_number": "+1234567890",
+            "phone_code_hash": "hash123",
+            "language_code": "en",
+            "chat_id": mock_update.effective_chat.id,
+        }
+
+        mock_update.message.text = "12345"
+
+        with patch("handlers.pyrogram_handlers.get_system_message", new_callable=AsyncMock, return_value="Enter 2FA"):
+            with pytest.raises(ApplicationHandlerStop):
+                await handle_connect_text(mock_update, mock_context)
+
+        mock_context.bot.send_message.assert_called_once_with(
+            chat_id=mock_update.effective_chat.id, text="Enter 2FA",
+        )
+        assert _pending_phone[user_id]["state"] == "awaiting_2fa"
+
+    @pytest.mark.asyncio
+    async def test_phone_2fa_success(self, mock_update, mock_context):
+        """Правильный 2FA → подключение."""
+        user_id = mock_update.effective_user.id
+        mock_client = AsyncMock()
+        mock_client.export_session_string = AsyncMock(return_value="session-2fa")
+        mock_client.storage.user_id = AsyncMock()
+        mock_client.storage.is_bot = AsyncMock()
+
+        user_obj = MagicMock()
+        user_obj.id = 777
+        user_obj.bot = False
+        auth_result = MagicMock()
+        auth_result.user = user_obj
+        mock_client.invoke = AsyncMock(side_effect=[MagicMock(), auth_result])
+
+        _pending_phone[user_id] = {
+            "state": "awaiting_2fa",
+            "client": mock_client,
+            "phone_number": "+1234567890",
+            "phone_code_hash": "hash123",
+            "language_code": "en",
+            "chat_id": mock_update.effective_chat.id,
+        }
+
+        mock_update.message.text = "password123"
+
+        with patch("handlers.pyrogram_handlers.GetPassword", return_value="get-password"), \
+             patch("handlers.pyrogram_handlers.CheckPassword", side_effect=lambda password: ("check-password", password)), \
+             patch("handlers.pyrogram_handlers.compute_password_check", return_value="srp-check"), \
+             patch("handlers.pyrogram_handlers.save_session", new_callable=AsyncMock, return_value=True) as mock_save, \
+             patch("handlers.pyrogram_handlers.pyrogram_client") as mock_pc, \
+             patch("handlers.pyrogram_handlers.get_system_message", new_callable=AsyncMock, return_value="Connected"):
+            mock_pc.start_listening = AsyncMock(return_value=True)
+
+            with pytest.raises(ApplicationHandlerStop):
+                await handle_connect_text(mock_update, mock_context)
+
+        mock_save.assert_called_once_with(user_id, "session-2fa")
+        assert user_id not in _pending_phone
+
+    @pytest.mark.asyncio
+    async def test_phone_2fa_wrong_password(self, mock_update, mock_context):
+        """Неправильный 2FA → ошибка, остаёмся в awaiting_2fa."""
+        user_id = mock_update.effective_user.id
+        mock_client = AsyncMock()
+
+        class PasswordHashInvalid(Exception):
+            pass
+
+        mock_client.invoke = AsyncMock(side_effect=[MagicMock(), PasswordHashInvalid()])
+
+        _pending_phone[user_id] = {
+            "state": "awaiting_2fa",
+            "client": mock_client,
+            "phone_number": "+1234567890",
+            "phone_code_hash": "hash123",
+            "language_code": "en",
+            "chat_id": mock_update.effective_chat.id,
+        }
+
+        mock_update.message.text = "wrongpassword"
+
+        with patch("handlers.pyrogram_handlers.GetPassword", return_value="get-password"), \
+             patch("handlers.pyrogram_handlers.CheckPassword", side_effect=lambda password: ("check-password", password)), \
+             patch("handlers.pyrogram_handlers.compute_password_check", return_value="srp-check"), \
+             patch("handlers.pyrogram_handlers.get_system_message", new_callable=AsyncMock, return_value="Wrong password"):
+            with pytest.raises(ApplicationHandlerStop):
+                await handle_connect_text(mock_update, mock_context)
+
+        mock_context.bot.send_message.assert_called_once_with(
+            chat_id=mock_update.effective_chat.id, text="Wrong password",
+        )
+        assert _pending_phone[user_id]["state"] == "awaiting_2fa"
+
+    @pytest.mark.asyncio
+    async def test_qr_button_cancels_phone_and_starts_qr(self, mock_update, mock_context):
+        """Нажатие QR-кнопки → отменяет phone-flow, запускает QR."""
+        user_id = mock_update.effective_user.id
+        _pending_phone[user_id] = {
+            "state": "awaiting_phone",
+            "language_code": "en",
+            "chat_id": mock_update.effective_chat.id,
+        }
+
+        query = AsyncMock()
+        query.answer = AsyncMock()
+        query.edit_message_text = AsyncMock()
+        mock_update.callback_query = query
+
+        with patch("handlers.pyrogram_handlers.pyrogram_client") as mock_pc, \
+             patch("handlers.pyrogram_handlers._get_qr_login_task", return_value=None), \
+             patch("handlers.pyrogram_handlers._start_qr_flow", new_callable=AsyncMock) as mock_qr:
+            mock_pc.is_active.return_value = False
+
+            await on_connect_qr_callback(mock_update, mock_context)
+
+        query.answer.assert_called_once()
+        assert user_id not in _pending_phone
+        mock_qr.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_disconnect_cancels_pending_phone(self, mock_update, mock_context):
+        """`/disconnect` отменяет активный phone-flow."""
+        user_id = mock_update.effective_user.id
+        temp_client = AsyncMock()
+        _pending_phone[user_id] = {
+            "state": "awaiting_code",
+            "client": temp_client,
+            "language_code": "en",
+            "chat_id": mock_update.effective_chat.id,
+        }
+
+        with patch("handlers.pyrogram_handlers.pyrogram_client") as mock_pc, \
+             patch("handlers.pyrogram_handlers.clear_session", new_callable=AsyncMock, return_value=True), \
+             patch("handlers.pyrogram_handlers.get_system_message", new_callable=AsyncMock, return_value="Disconnected"):
+            mock_pc.is_active.return_value = False
+
+            await on_disconnect(mock_update, mock_context)
+
+        temp_client.disconnect.assert_called_once()
+        assert user_id not in _pending_phone
+        mock_update.message.reply_text.assert_called_once_with("Disconnected")
+
+    @pytest.mark.asyncio
+    async def test_connect_rejects_when_phone_flow_running(self, mock_update, mock_context):
+        """Повторный /connect при активном phone-flow → отказ."""
+        user_id = mock_update.effective_user.id
+        _pending_phone[user_id] = {
+            "state": "awaiting_phone",
+            "language_code": "en",
+            "chat_id": mock_update.effective_chat.id,
+        }
+
+        with patch("handlers.pyrogram_handlers.pyrogram_client") as mock_pc, \
+             patch("handlers.pyrogram_handlers._get_qr_login_task", return_value=None), \
+             patch("handlers.pyrogram_handlers.get_system_message", new_callable=AsyncMock, return_value="In progress"):
+            mock_pc.is_active.return_value = False
+
+            await on_connect(mock_update, mock_context)
+
+        mock_update.message.reply_text.assert_called_once_with("In progress")
+
+    @pytest.mark.asyncio
+    async def test_flood_wait_shows_retry_time(self, mock_update, mock_context):
+        """FloodWait → показывает время ожидания."""
+        user_id = mock_update.effective_user.id
+        _pending_phone[user_id] = {
+            "state": "awaiting_phone",
+            "language_code": "en",
+            "chat_id": mock_update.effective_chat.id,
+        }
+
+        class FloodWait(Exception):
+            def __init__(self):
+                self.value = 60
+
+        mock_client = AsyncMock()
+        mock_client.connect = AsyncMock()
+        mock_client.send_code = AsyncMock(side_effect=FloodWait())
+
+        mock_update.message.text = "+1234567890"
+
+        with patch("handlers.pyrogram_handlers.Client", return_value=mock_client), \
+             patch("handlers.pyrogram_handlers.get_system_message", new_callable=AsyncMock, return_value="Wait {seconds}s"):
+            with pytest.raises(ApplicationHandlerStop):
+                await handle_connect_text(mock_update, mock_context)
+
+        mock_context.bot.send_message.assert_called_once_with(
+            chat_id=mock_update.effective_chat.id, text="Wait 60s",
+        )
+        assert user_id not in _pending_phone
+
+    @pytest.mark.asyncio
+    async def test_phone_message_deleted_for_security(self, mock_update, mock_context):
+        """Номер телефона удаляется из чата."""
+        user_id = mock_update.effective_user.id
+        _pending_phone[user_id] = {
+            "state": "awaiting_phone",
+            "language_code": "en",
+            "chat_id": mock_update.effective_chat.id,
+        }
+
+        mock_client = AsyncMock()
+        mock_sent_code = MagicMock()
+        mock_sent_code.phone_code_hash = "hash123"
+        mock_client.send_code = AsyncMock(return_value=mock_sent_code)
+        mock_client.connect = AsyncMock()
+
+        mock_update.message.text = "+1234567890"
+
+        with patch("handlers.pyrogram_handlers.Client", return_value=mock_client), \
+             patch("handlers.pyrogram_handlers.get_system_message", new_callable=AsyncMock, return_value="Enter code"):
+            with pytest.raises(ApplicationHandlerStop):
+                await handle_connect_text(mock_update, mock_context)
+
+        mock_update.message.delete.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_expired_phone_flow_sends_timeout_and_stops(self, mock_update, mock_context):
+        """Протухший phone-flow должен очиститься и не дойти до on_text."""
+        user_id = mock_update.effective_user.id
+        temp_client = AsyncMock()
+        _pending_phone[user_id] = {
+            "state": "awaiting_code",
+            "client": temp_client,
+            "phone_number": "+1234567890",
+            "phone_code_hash": "hash123",
+            "language_code": "en",
+            "chat_id": mock_update.effective_chat.id,
+            "expires_at": 1,
+        }
+        mock_update.message.text = "12345"
+
+        with patch("handlers.pyrogram_handlers.time.monotonic", return_value=2), \
+             patch("handlers.pyrogram_handlers.get_system_message", new_callable=AsyncMock, return_value="Timed out"):
+            with pytest.raises(ApplicationHandlerStop):
+                await handle_connect_text(mock_update, mock_context)
+
+        temp_client.disconnect.assert_called_once()
+        assert user_id not in _pending_phone
+        mock_context.bot.send_message.assert_called_once_with(
+            chat_id=mock_update.effective_chat.id, text="Timed out",
+        )

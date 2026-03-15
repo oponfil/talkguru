@@ -24,7 +24,8 @@ from utils.utils import get_timestamp  # noqa: E402
 from clients import pyrogram_client  # noqa: E402
 from handlers.bot_handlers import on_start, on_text  # noqa: E402
 from handlers.pyrogram_handlers import (  # noqa: E402
-    on_disconnect, on_connect, on_status, handle_2fa_password,
+    on_disconnect, on_connect, on_status, handle_connect_text,
+    on_connect_qr_callback,
     on_pyrogram_message, on_pyrogram_draft,
 )
 from handlers.settings_handler import on_settings, on_settings_callback  # noqa: E402
@@ -65,7 +66,8 @@ def main() -> None:
     app.add_handler(CommandHandler("status", on_status, filters=PRIVATE_ONLY_FILTER))
     app.add_handler(CommandHandler("settings", on_settings, filters=PRIVATE_ONLY_FILTER))
     app.add_handler(CallbackQueryHandler(on_settings_callback, pattern=r"^settings:"))
-    app.add_handler(MessageHandler(PRIVATE_ONLY_FILTER & filters.TEXT & ~filters.COMMAND, handle_2fa_password), group=0)
+    app.add_handler(CallbackQueryHandler(on_connect_qr_callback, pattern=r"^connect:qr$"))
+    app.add_handler(MessageHandler(PRIVATE_ONLY_FILTER & filters.TEXT & ~filters.COMMAND, handle_connect_text), group=0)
     app.add_handler(MessageHandler(PRIVATE_ONLY_FILTER & filters.TEXT & ~filters.COMMAND, on_text), group=1)
 
     # Глобальный обработчик ошибок

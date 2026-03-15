@@ -63,6 +63,9 @@ MAX_CONTEXT_MESSAGES = 100  # Макс. кол-во сообщений из ча
 QR_LOGIN_TIMEOUT_SECONDS = 120  # Таймаут ожидания сканирования QR-кода (секунды)
 QR_LOGIN_POLL_INTERVAL = 2  # Интервал проверки сканирования (секунды)
 
+# ====== PHONE LOGIN ======
+PHONE_CODE_TIMEOUT_SECONDS = 120  # Таймаут на ввод кода при phone-логине (секунды)
+
 # ====== DRAFT INTERACTION ======
 DRAFT_PROBE_DELAY = 2  # Секунды ожидания после пробы (draft_typing)
 

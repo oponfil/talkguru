@@ -21,7 +21,7 @@ from utils.utils import get_timestamp
 # ====== Системные сообщения (на английском, переводятся для пользователя) ======
 SYSTEM_MESSAGES = {
     # — General —
-    "greeting": "👋 Hey! I'm TalkGuru — a bot that writes draft replies for you.\n\n1. 🔌 Connect your account via /connect (QR code).\n2. 🦉 When someone messages you — I automatically compose a draft reply in the input field.\n3. ✏️ Write an instruction in the draft — I'll rewrite it as soon as you leave the chat.",
+    "greeting": "👋 Hey! I'm TalkGuru — a bot that writes draft replies for you.\n\n1. 🔌 Connect your account via /connect (phone or QR code).\n2. 🦉 When someone messages you — I automatically compose a draft reply in the input field.\n3. ✏️ Write an instruction in the draft — I'll rewrite it as soon as you leave the chat.",
     "error": "⚠️ An error occurred. Please try again later.",
 
     # — Connect / Disconnect —
@@ -36,6 +36,16 @@ SYSTEM_MESSAGES = {
     "connect_2fa_error": "🔐 Failed to complete 2FA login. Please try /connect again.",
     "connect_2fa_prompt": "🔐 Your account has a cloud password (2FA). Please send your cloud password as a message.\n\n⚠️ The password will be used once for login and will NOT be stored:",
     "connect_2fa_wrong_password": "❌ Wrong password. Please try again — send your cloud password as a message:",
+
+    # — Connect: Phone flow —
+    "connect_phone_prompt": "📱 Send your phone number in international format (e.g. +1234567890).\n\n⚠️ The number will be used once for login and will NOT be stored.",
+    "connect_phone_btn_qr": "📷 Connect via QR code",
+    "connect_code_prompt": "📲 Enter the confirmation code you received from Telegram:",
+    "connect_code_invalid": "❌ Invalid code. Please try again:",
+    "connect_code_expired": "⏰ Code expired. Please try /connect again.",
+    "connect_phone_invalid": "❌ Invalid phone number. Please send your number in international format (e.g. +1234567890):",
+    "connect_phone_timeout": "⏰ Login timed out. Please try /connect again.",
+    "connect_flood_wait": "⏳ Too many attempts. Please wait {seconds} seconds and try /connect again.",
 
     # — Status —
     "status_connected": "✅ Your account is connected. I'm suggesting replies to your incoming messages as drafts.",
