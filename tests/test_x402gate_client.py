@@ -194,3 +194,42 @@ class TestTopupError:
         err = TopupError("payment failed")
         assert isinstance(err, RuntimeError)
         assert str(err) == "payment failed"
+
+
+class TestCheckLowBalanceWarning:
+    """Тесты для _check_low_balance_warning()."""
+
+    def test_warns_when_below_threshold(self, capsys):
+        """Выводит предупреждение если баланс ниже порога."""
+        client = X402GateClient(private_key="0x0000000000000000000000000000000000000000000000000000000000000001")
+        client._prepaid_balance = 5.0
+
+        with patch("clients.x402gate.X402GATE_PREPAID_LOW_BALANCE_WARN", 10.0):
+            client._check_low_balance_warning()
+
+        output = capsys.readouterr().out
+        assert "Low prepaid balance" in output
+        assert "$5.0000" in output
+
+    def test_silent_when_above_threshold(self, capsys):
+        """Не выводит предупреждение если баланс выше порога."""
+        client = X402GateClient(private_key="0x0000000000000000000000000000000000000000000000000000000000000001")
+        client._prepaid_balance = 15.0
+
+        with patch("clients.x402gate.X402GATE_PREPAID_LOW_BALANCE_WARN", 10.0):
+            client._check_low_balance_warning()
+
+        output = capsys.readouterr().out
+        assert output == ""
+
+    def test_silent_when_balance_is_none(self, capsys):
+        """Не выводит предупреждение если баланс неизвестен."""
+        client = X402GateClient(private_key="0x0000000000000000000000000000000000000000000000000000000000000001")
+        client._prepaid_balance = None
+
+        with patch("clients.x402gate.X402GATE_PREPAID_LOW_BALANCE_WARN", 10.0):
+            client._check_low_balance_warning()
+
+        output = capsys.readouterr().out
+        assert output == ""
+

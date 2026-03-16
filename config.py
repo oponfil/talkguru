@@ -38,6 +38,7 @@ X402GATE_URL = "https://x402gate.io"
 X402GATE_TIMEOUT = 120  # Таймаут запроса (секунды)
 X402GATE_PREPAID_TOPUP_AMOUNT = 0.5  # Сумма пополнения prepaid ($)
 X402GATE_PREPAID_MIN_BALANCE = 0.10  # Минимальный порог баланса ($)
+X402GATE_PREPAID_LOW_BALANCE_WARN = 10.0  # Порог предупреждения о низком балансе ($)
 EVM_PRIVATE_KEY = os.getenv("EVM_PRIVATE_KEY", "")
 
 # ====== ЯЗЫК ======
@@ -49,10 +50,11 @@ LLM_MODEL = "google/gemini-3.1-flash-lite-preview"  # FREE-модель (по у
 STYLE_PRO_MODELS: dict[str | None, str] = {
     None: "openai/gpt-5.4",
     "friend": "openai/gpt-5.4",
-    "business": "openai/gpt-5.4",
-    "sales": "openai/gpt-5.4",
     "romance": "openai/gpt-5.4",
     "seducer": "google/gemini-3.1-pro-preview",
+    "business": "openai/gpt-5.4",
+    "sales": "openai/gpt-5.4",
+    "paranoid": "openai/gpt-5.4",
 }
 # Уровень reasoning для конкретных моделей (minimal/low/medium/high).
 # Если модели нет в словаре — используется "medium" по умолчанию.
@@ -117,6 +119,7 @@ STYLE_OPTIONS: dict[str | None, str] = {
     "sales": "settings_style_sales",
     "romance": "settings_style_romance",
     "seducer": "settings_style_seducer",
+    "paranoid": "settings_style_paranoid",
 }
 
 # ====== ЧАСОВОЙ ПОЯС ======

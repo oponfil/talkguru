@@ -16,21 +16,22 @@ class TestBuildSettingsText:
     """Тесты для _build_settings_text()."""
 
     def test_no_prompt_returns_title(self):
-        """Без промпта → только заголовок."""
-        assert _build_settings_text(TITLE, {}) == TITLE
-        assert _build_settings_text(TITLE, {"custom_prompt": ""}) == TITLE
+        """Без промпта → только заголовок, без parse_mode."""
+        assert _build_settings_text(TITLE, {}) == (TITLE, None)
+        assert _build_settings_text(TITLE, {"custom_prompt": ""}) == (TITLE, None)
 
     def test_short_prompt_shown_fully(self):
-        """Короткий промпт → показывается полностью."""
-        result = _build_settings_text(TITLE, {"custom_prompt": "Be friendly"})
-        assert "«Be friendly»" in result
-        assert "…" not in result
+        """Короткий промпт → показывается полностью, без parse_mode."""
+        text, parse_mode = _build_settings_text(TITLE, {"custom_prompt": "Be friendly"})
+        assert "«Be friendly»" in text
+        assert parse_mode is None
 
     def test_long_prompt_shown_fully(self):
-        """Длинный промпт → показывается полностью."""
+        """Длинный промпт → показывается полностью, без parse_mode."""
         long_prompt = "A" * 900
-        result = _build_settings_text(TITLE, {"custom_prompt": long_prompt})
-        assert f"«{long_prompt}»" in result
+        text, parse_mode = _build_settings_text(TITLE, {"custom_prompt": long_prompt})
+        assert f"«{long_prompt}»" in text
+        assert parse_mode is None
 
 
 class TestOnSettings:
@@ -292,13 +293,15 @@ class TestSettingsKeyboardTimezone:
         """Кнопка timezone по умолчанию содержит UTC0."""
         from handlers.settings_handler import _build_settings_keyboard
         keyboard = _build_settings_keyboard({}, MESSAGES)
-        tz_btn = keyboard.inline_keyboard[5][0]
-        assert "UTC0" in tz_btn.text
-        assert tz_btn.callback_data == "settings:timezone"
+        tz_row = keyboard.inline_keyboard[5]
+        assert len(tz_row) == 2
+        assert tz_row[0].callback_data == "settings:timezone_back"
+        assert "UTC0" in tz_row[1].text
+        assert tz_row[1].callback_data == "settings:timezone"
 
     def test_timezone_button_custom_offset(self):
         """Кнопка timezone с offset=5.5 содержит UTC+5:30."""
         from handlers.settings_handler import _build_settings_keyboard
         keyboard = _build_settings_keyboard({"tz_offset": 5.5}, MESSAGES)
-        tz_btn = keyboard.inline_keyboard[5][0]
+        tz_btn = keyboard.inline_keyboard[5][1]
         assert "UTC+5:30" in tz_btn.text

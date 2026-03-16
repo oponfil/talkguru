@@ -1,4 +1,4 @@
-from prompts import build_draft_prompt
+from prompts import build_draft_prompt, build_reply_prompt
 
 
 class TestBuildDraftPrompt:
@@ -16,3 +16,22 @@ class TestBuildDraftPrompt:
         assert "You receive the recent chat history" in prompt
         assert "Mimic the user's writing style from the chat history" in prompt
         assert "Write naturally and human-like" not in prompt
+
+    def test_paranoid_style_included_in_draft_prompt(self):
+        """Стиль paranoid добавляет блок про безопасность."""
+        prompt = build_draft_prompt(has_history=True, style="paranoid")
+
+        assert "Paranoid Guru" in prompt
+        assert "gatekeeper" in prompt
+        assert "scam" in prompt
+
+
+class TestBuildReplyPrompt:
+    def test_paranoid_style_included_in_reply_prompt(self):
+        """Стиль paranoid добавляет блок про безопасность."""
+        prompt = build_reply_prompt(style="paranoid")
+
+        assert "Paranoid Guru" in prompt
+        assert "gatekeeper" in prompt
+        assert "scam" in prompt
+

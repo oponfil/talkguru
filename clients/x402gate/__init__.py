@@ -16,6 +16,7 @@ from x402.mechanisms.evm.signers import EthAccountSigner
 from config import (
     DEBUG_PRINT,
     EVM_PRIVATE_KEY,
+    X402GATE_PREPAID_LOW_BALANCE_WARN,
     X402GATE_PREPAID_MIN_BALANCE,
     X402GATE_PREPAID_TOPUP_AMOUNT,
     X402GATE_TIMEOUT,
@@ -209,6 +210,7 @@ class X402GateClient:
                 )
 
                 self._topup_generation += 1
+                self._check_low_balance_warning()
                 return self._prepaid_balance
 
         except Exception as e:
@@ -285,7 +287,7 @@ class X402GateClient:
             ):
                 observed_generation = self._topup_generation
                 print(
-                    f"{get_timestamp()} [X402GATE] Prepaid balance insufficient, "
+                    f"{get_timestamp()} [X402GATE] ❌ Prepaid balance insufficient, "
                     f"auto top-up ${X402GATE_PREPAID_TOPUP_AMOUNT:.2f}..."
                 )
                 self._prepaid_balance = await self._run_auto_topup(
@@ -317,6 +319,17 @@ class X402GateClient:
                     pass
 
             return result
+
+    def _check_low_balance_warning(self) -> None:
+        """Логирует предупреждение если баланс ниже порога."""
+        if (
+            self._prepaid_balance is not None
+            and self._prepaid_balance < X402GATE_PREPAID_LOW_BALANCE_WARN
+        ):
+            print(
+                f"{get_timestamp()} [X402GATE] ⚠️ Low prepaid balance: "
+                f"${self._prepaid_balance:.4f} (threshold=${X402GATE_PREPAID_LOW_BALANCE_WARN:.0f})"
+            )
 
 
 # Глобальный экземпляр клиента

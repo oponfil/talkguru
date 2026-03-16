@@ -55,18 +55,39 @@ def _build_settings_keyboard(settings: dict, messages: dict) -> InlineKeyboardMa
         [InlineKeyboardButton(prompt_label, callback_data="settings:prompt")],
         [InlineKeyboardButton(style_label, callback_data="settings:style")],
         [InlineKeyboardButton(auto_label, callback_data="settings:auto_reply")],
-        [InlineKeyboardButton(tz_label, callback_data="settings:timezone")],
+        [
+            InlineKeyboardButton("⏪", callback_data="settings:timezone_back"),
+            InlineKeyboardButton(f"{tz_label} ⏩️", callback_data="settings:timezone"),
+        ],
     ]
     return InlineKeyboardMarkup(keyboard)
 
 
-def _build_settings_text(title: str, settings: dict) -> str:
-    """Формирует текст сообщения настроек с превью промпта."""
-    custom_prompt = settings.get("custom_prompt", "")
-    if not custom_prompt:
-        return title
+def _escape_markdown_v2(text: str) -> str:
+    """Экранирует спецсимволы для Telegram MarkdownV2."""
+    special_chars = r"_*[]()~`>#+-=|{}.!"
+    return "".join(f"\\{c}" if c in special_chars else c for c in text)
 
-    return f"{title}\n\n📝 «{custom_prompt}»"
+
+def _build_settings_text(title: str, settings: dict) -> tuple[str, str | None]:
+    """Формирует текст сообщения настроек с превью промпта.
+
+    Returns:
+        (text, parse_mode) — parse_mode задаётся только при strikethrough.
+    """
+    custom_prompt = settings.get("custom_prompt", "")
+    cleared_prompt = settings.get("_cleared_prompt", "")
+
+    if cleared_prompt:
+        escaped_title = _escape_markdown_v2(title)
+        escaped_prompt = _escape_markdown_v2(cleared_prompt)
+        text = f"{escaped_title}\n\n📝 ~«{escaped_prompt}»~"
+        return text, "MarkdownV2"
+
+    if not custom_prompt:
+        return title, None
+
+    return f"{title}\n\n📝 «{custom_prompt}»", None
 
 
 async def _send_settings_error(query, language_code: str | None) -> None:
@@ -92,9 +113,9 @@ async def on_settings(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
     messages = await get_system_messages(u.language_code)
 
-    text = _build_settings_text(title, settings)
+    text, parse_mode = _build_settings_text(title, settings)
     keyboard = _build_settings_keyboard(settings, messages)
-    await update.message.reply_text(text, reply_markup=keyboard)
+    await update.message.reply_text(text, reply_markup=keyboard, parse_mode=parse_mode)
 
     if DEBUG_PRINT:
         print(f"{get_timestamp()} [BOT] /settings from user {u.id}")
@@ -139,6 +160,7 @@ async def on_settings_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     elif action == "settings:prompt":
         # Если промпт уже установлен — очищаем, иначе запрашиваем ввод
         if settings.get("custom_prompt"):
+            old_prompt = settings["custom_prompt"]
             updated_settings = await update_user_settings(
                 u.id,
                 {"custom_prompt": ""},
@@ -147,6 +169,8 @@ async def on_settings_callback(update: Update, context: ContextTypes.DEFAULT_TYP
             if updated_settings is None:
                 await _send_settings_error(query, u.language_code)
                 return
+            # Передаём удалённый промпт для отображения в сообщении
+            updated_settings["_cleared_prompt"] = old_prompt
         else:
             # Ставим флаг ожидания промпта
             context.user_data["awaiting_prompt"] = True
@@ -181,13 +205,14 @@ async def on_settings_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         if updated_settings is None:
             await _send_settings_error(query, u.language_code)
             return
-    elif action == "settings:timezone":
+    elif action in ("settings:timezone", "settings:timezone_back"):
         current = settings.get("tz_offset", 0) or 0
         try:
             idx = TIMEZONE_OFFSETS.index(current)
         except ValueError:
             idx = TIMEZONE_OFFSETS.index(0)
-        next_value = TIMEZONE_OFFSETS[(idx + 1) % len(TIMEZONE_OFFSETS)]
+        step = 1 if action == "settings:timezone" else -1
+        next_value = TIMEZONE_OFFSETS[(idx + step) % len(TIMEZONE_OFFSETS)]
         updated_settings = await update_user_settings(
             u.id,
             {"tz_offset": next_value},
@@ -203,9 +228,9 @@ async def on_settings_callback(update: Update, context: ContextTypes.DEFAULT_TYP
 
     keyboard = _build_settings_keyboard(updated_settings, messages)
     title = messages.get("settings_title", "⚙️ Settings")
-    text = _build_settings_text(title, updated_settings)
+    text, parse_mode = _build_settings_text(title, updated_settings)
 
-    await query.edit_message_text(text=text, reply_markup=keyboard)
+    await query.edit_message_text(text=text, reply_markup=keyboard, parse_mode=parse_mode)
 
     if DEBUG_PRINT:
         print(f"{get_timestamp()} [BOT] Settings updated by user {u.id}: {action}")

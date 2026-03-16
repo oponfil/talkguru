@@ -21,7 +21,19 @@ from utils.utils import get_timestamp
 # ====== Системные сообщения (на английском, переводятся для пользователя) ======
 SYSTEM_MESSAGES = {
     # — General —
-    "greeting": "👋 Hey! I'm DraftGuru — a bot that writes draft replies for you.\n\n1. 🔌 Connect your account via /connect (phone or QR code).\n2. 🦉 When someone messages you — I automatically compose a draft reply in the input field.\n3. ✏️ Write an instruction in the draft — I'll rewrite it as soon as you leave the chat.\n\n🔞 For users 18+ only.",
+    "greeting": (
+        "👋 Hey! I'm DraftGuru — an open-source Telegram bot that safely helps you reply to messages using AI.\n\n"
+        "How to use:\n"
+        "1. 🔌 Connect your account via /connect\n"
+        "2. 🦉 When someone messages you, I will automatically compose a draft reply in your text input field.\n"
+        "3. ✏️ Don't like the draft? Write an instruction inside it, and I'll rewrite it when you close the chat.\n\n"
+        "🔐 Privacy & Security:\n"
+        "• I only write drafts. I NEVER send messages automatically (unless you configure a timer).\n"
+        "• I do NOT store your chat history.\n"
+        "• I completely ignore your 'Saved Messages' chat.\n\n"
+        "💻 GitHub: https://github.com/oponfil/draftguru\n"
+        "🔞 For users 18+ only."
+    ),
     "error": "⚠️ An error occurred. Please try again later.",
 
     # — Connect / Disconnect —
@@ -67,8 +79,8 @@ SYSTEM_MESSAGES = {
     "settings_drafts_off": "✏️ Draft editing: ❌ OFF",
     "settings_model_free": "🤖 Model: FREE",
     "settings_model_pro": "🤖 Model: ⭐ PRO",
-    "settings_prompt_set": "📝 Prompt: ✅ set (tap to clear)",
-    "settings_prompt_empty": "📝 Prompt: not set",
+    "settings_prompt_set": "📝 Prompt: ✅ ON",
+    "settings_prompt_empty": "📝 Prompt: ❌ OFF",
     "settings_prompt_enter": f"📝 Send your custom prompt as a message. It will be added to the AI system prompt for all chats.\n\n⚠️ Max length: {CUSTOM_PROMPT_MAX_LENGTH} characters.",
     "settings_prompt_truncated": f"⚠️ Prompt was too long, so I saved only the first {CUSTOM_PROMPT_MAX_LENGTH} characters.",
     "settings_prompt_saved": "✅ Custom prompt saved!",
@@ -86,6 +98,7 @@ SYSTEM_MESSAGES = {
     "settings_style_sales": "💰 Style: Sales Guru",
     "settings_style_friend": "🍻 Style: Friend Guru",
     "settings_style_seducer": "😈 Style: Seducer Guru",
+    "settings_style_paranoid": "🕵️ Style: Paranoid Guru",
 }
 
 
