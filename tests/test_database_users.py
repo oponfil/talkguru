@@ -6,6 +6,7 @@ import pytest
 
 from database.users import (
     clear_session,
+    ensure_user_exists,
     get_session,
     get_user,
     get_users_with_sessions,
@@ -15,6 +16,7 @@ from database.users import (
     update_user_settings,
     update_tg_rating,
     upsert_user,
+    UserStorageError,
 )
 from utils.session_crypto import decrypt_session_string, encrypt_session_string
 
@@ -81,8 +83,9 @@ class TestUpsertUser:
         """Не падает при ошибке Supabase."""
         with patch("database.users.supabase") as mock_sb:
             mock_sb.table.side_effect = Exception("DB error")
-            # Не должно бросить исключение
-            await upsert_user(user_id=789)
+            result = await upsert_user(user_id=789)
+
+        assert result is False
 
 
 class TestUpdateLastMsgAt:
@@ -302,11 +305,58 @@ class TestGetUser:
         assert result is None
 
     @pytest.mark.asyncio
-    async def test_returns_none_on_error(self):
+    async def test_raises_on_error(self):
         with patch("database.users.supabase") as mock_sb:
             mock_sb.table.side_effect = Exception("DB error")
-            result = await get_user(123)
-        assert result is None
+            with pytest.raises(UserStorageError):
+                await get_user(123)
+
+
+class TestEnsureUserExists:
+    """Тесты для ensure_user_exists()."""
+
+    @pytest.mark.asyncio
+    async def test_returns_existing_user(self):
+        existing_user = {"user_id": 123, "settings": {"pro_model": True}}
+
+        with patch("database.users.get_user", new_callable=AsyncMock, return_value=existing_user), \
+             patch("database.users.upsert_user", new_callable=AsyncMock) as mock_upsert:
+            result = await ensure_user_exists(123)
+
+        assert result == existing_user
+        mock_upsert.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_creates_missing_user(self):
+        with patch("database.users.get_user", new_callable=AsyncMock, return_value=None), \
+             patch("database.users.upsert_user", new_callable=AsyncMock, return_value=True) as mock_upsert:
+            result = await ensure_user_exists(
+                123,
+                username="alice",
+                first_name="Alice",
+                language_code="ru",
+            )
+
+        mock_upsert.assert_called_once_with(
+            user_id=123,
+            username="alice",
+            first_name="Alice",
+            last_name=None,
+            is_bot=False,
+            is_premium=False,
+            language_code="ru",
+        )
+        assert result["user_id"] == 123
+        assert result["username"] == "alice"
+        assert result["language_code"] == "ru"
+        assert result["settings"] == {}
+
+    @pytest.mark.asyncio
+    async def test_raises_when_create_fails(self):
+        with patch("database.users.get_user", new_callable=AsyncMock, return_value=None), \
+             patch("database.users.upsert_user", new_callable=AsyncMock, return_value=False):
+            with pytest.raises(UserStorageError):
+                await ensure_user_exists(123)
 
 
 class TestUpdateUserSettings:
@@ -321,7 +371,7 @@ class TestUpdateUserSettings:
 
             result = await update_user_settings(123, {"pro_model": True})
 
-        assert result is True
+        assert result == {"drafts_enabled": True, "pro_model": True}
         mock_table.update.assert_called_once_with(
             {"settings": {"drafts_enabled": True, "pro_model": True}}
         )
@@ -336,7 +386,7 @@ class TestUpdateUserSettings:
 
             result = await update_user_settings(123, {"pro_model": True})
 
-        assert result is True
+        assert result == {"pro_model": True}
         mock_table.upsert.assert_called_once_with(
             {"user_id": 123, "settings": {"pro_model": True}},
             on_conflict="user_id",

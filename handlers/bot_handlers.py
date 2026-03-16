@@ -5,11 +5,12 @@ import traceback
 from telegram import Update
 from telegram.ext import ContextTypes
 
-from config import CUSTOM_PROMPT_MAX_LENGTH, DEBUG_PRINT, LLM_MODEL_PRO, MAX_CONTEXT_MESSAGES
+from config import CUSTOM_PROMPT_MAX_LENGTH, DEBUG_PRINT, STYLE_PRO_MODELS, MAX_CONTEXT_MESSAGES
 from utils.utils import get_timestamp, typing_action
 from utils.bot_utils import update_user_menu
+from utils.telegram_user import ensure_effective_user, upsert_effective_user
 from clients.x402gate.openrouter import generate_response
-from database.users import upsert_user, update_last_msg_at, update_tg_rating, get_user_settings, update_user_settings
+from database.users import update_last_msg_at, update_tg_rating, update_user_settings
 from utils.telegram_rating import extract_rating_from_chat
 from system_messages import get_system_message, SYSTEM_MESSAGES
 from clients import pyrogram_client
@@ -24,15 +25,10 @@ async def on_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         print(f"{get_timestamp()} [BOT] /start from user {u.id} (@{u.username})")
 
     # Сохраняем пользователя в БД
-    await upsert_user(
-        user_id=u.id,
-        username=u.username,
-        first_name=u.first_name,
-        last_name=u.last_name,
-        is_bot=u.is_bot,
-        is_premium=bool(u.is_premium),
-        language_code=u.language_code,
-    )
+    if not await upsert_effective_user(update):
+        error_msg = await get_system_message(u.language_code, "error")
+        await update.message.reply_text(error_msg or SYSTEM_MESSAGES["error"])
+        return
 
     # Обновляем tg_rating (Telegram Stars) через getChat
     try:
@@ -82,22 +78,24 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             print(f"{get_timestamp()} [BOT] Custom prompt saved for user {u.id}: {len(prompt_text)} chars")
         return
 
-    # Обновляем last_msg_at
-    await update_last_msg_at(u.id)
-
-    # История сообщений в чате с ботом (хранится в context.chat_data)
-    history: list[dict] = context.chat_data.setdefault("history", [])
-
-    if DEBUG_PRINT:
-        print(
-            f"{get_timestamp()} [BOT] Text from user {u.id}: "
-            f"{len(message_text)} chars, history: {len(history)} messages"
-        )
-
     try:
+        user = await ensure_effective_user(update)
+
+        # Обновляем last_msg_at только после гарантированного наличия записи пользователя.
+        await update_last_msg_at(u.id)
+
+        # История сообщений в чате с ботом (хранится в context.chat_data)
+        history: list[dict] = context.chat_data.setdefault("history", [])
+
+        if DEBUG_PRINT:
+            print(
+                f"{get_timestamp()} [BOT] Text from user {u.id}: "
+                f"{len(message_text)} chars, history: {len(history)} messages"
+            )
+
         # Читаем настройки пользователя для выбора модели
-        user_settings = await get_user_settings(u.id)
-        model = LLM_MODEL_PRO if user_settings.get("pro_model") else None
+        user_settings = (user or {}).get("settings") or {}
+        model = STYLE_PRO_MODELS[None] if user_settings.get("pro_model") else None
 
         # Генерируем ответ через OpenRouter с историей
         kwargs: dict = {"chat_history": history[-MAX_CONTEXT_MESSAGES:]}

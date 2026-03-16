@@ -45,7 +45,15 @@ DEFAULT_LANGUAGE_CODE = "en"  # Язык по умолчанию (ISO 639-1)
 
 # ====== МОДЕЛЬ ИИ ======
 LLM_MODEL = "google/gemini-3.1-flash-lite-preview"  # FREE-модель (по умолчанию)
-LLM_MODEL_PRO = "openai/gpt-5.4"  # PRO-модель
+# PRO-модель для каждого стиля. Используется при pro_model=True.
+STYLE_PRO_MODELS: dict[str | None, str] = {
+    None: "openai/gpt-5.4",
+    "friend": "openai/gpt-5.4",
+    "business": "openai/gpt-5.4",
+    "sales": "openai/gpt-5.4",
+    "flirt": "google/gemini-3.1-pro-preview",
+    "seducer": "google/gemini-3.1-pro-preview",
+}
 
 # ====== RETRY ======
 RETRY_ATTEMPTS = 2  # Количество повторных попыток
@@ -57,7 +65,7 @@ SYSTEM_MESSAGE_TRANSLATION_TIMEOUT = 60
 SYSTEM_MESSAGES_FALLBACK_TTL_SECONDS = 300.0
 
 # ====== КОНТЕКСТ ======
-MAX_CONTEXT_MESSAGES = 100  # Макс. кол-во сообщений из чата для контекста
+MAX_CONTEXT_MESSAGES = 40  # Макс. кол-во сообщений из чата для контекста
 
 # ====== QR LOGIN ======
 QR_LOGIN_TIMEOUT_SECONDS = 120  # Таймаут ожидания сканирования QR-кода (секунды)

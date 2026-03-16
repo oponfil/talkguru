@@ -21,16 +21,17 @@ from config import (
     PYROGRAM_API_ID, PYROGRAM_API_HASH, DEBUG_PRINT,
     PHONE_CODE_TIMEOUT_SECONDS,
     QR_LOGIN_TIMEOUT_SECONDS, QR_LOGIN_POLL_INTERVAL,
-    DRAFT_PROBE_DELAY, LLM_MODEL_PRO,
+    DRAFT_PROBE_DELAY, STYLE_PRO_MODELS,
 )
 from utils.utils import format_chat_history, get_timestamp, normalize_auto_reply, typing_action
 from utils.bot_utils import update_user_menu
 from clients.x402gate.openrouter import generate_response
 from logic.reply import generate_reply
 from clients import pyrogram_client
-from database.users import clear_session, get_user, get_user_settings, save_session, upsert_user
+from database.users import clear_session, get_user, save_session
 from system_messages import get_system_message
 from prompts import build_draft_prompt
+from utils.telegram_user import ensure_effective_user, upsert_effective_user
 
 
 # ====== /disconnect ======
@@ -39,6 +40,14 @@ from prompts import build_draft_prompt
 async def on_disconnect(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Обработчик команды /disconnect — отключает аккаунт."""
     u = update.effective_user
+
+    try:
+        await ensure_effective_user(update)
+    except Exception:
+        msg = await get_system_message(u.language_code, "error")
+        await update.message.reply_text(msg)
+        return
+
     is_active = pyrogram_client.is_active(u.id)
     had_pending_2fa = await _cancel_pending_2fa(u.id)
     had_pending_phone = await _cancel_pending_phone(u.id)
@@ -78,6 +87,13 @@ async def on_disconnect(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 async def on_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Обработчик команды /status — показывает статус подключения."""
     u = update.effective_user
+
+    try:
+        await ensure_effective_user(update)
+    except Exception:
+        msg = await get_system_message(u.language_code, "error")
+        await update.message.reply_text(msg)
+        return
 
     if DEBUG_PRINT:
         print(f"{get_timestamp()} [BOT] /status from user {u.id} (@{u.username}, lang={u.language_code})")
@@ -233,15 +249,10 @@ async def on_connect(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 
     try:
         # /connect должен работать даже без предварительного /start
-        await upsert_user(
-            user_id=u.id,
-            username=u.username,
-            first_name=u.first_name,
-            last_name=u.last_name,
-            is_bot=u.is_bot,
-            is_premium=bool(u.is_premium),
-            language_code=u.language_code,
-        )
+        if not await upsert_effective_user(update):
+            msg = await get_system_message(u.language_code, "connect_error")
+            await update.message.reply_text(msg)
+            return
 
         # Регистрируем phone-flow (ожидание номера)
         _put_pending_phone(u.id, {
@@ -861,8 +872,10 @@ async def on_pyrogram_message(user_id: int, pyrogram_client_instance, message) -
     chat_id = message.chat.id
     key = (user_id, chat_id)
 
-    # Читаем настройки пользователя
-    user_settings = await get_user_settings(user_id)
+    # Читаем пользователя и настройки одним запросом
+    user = await get_user(user_id)
+    user_settings = (user or {}).get("settings") or {}
+    lang = (user or {}).get("language_code")
 
     if DEBUG_PRINT:
         sender = message.from_user.first_name if message.from_user else "Unknown"
@@ -884,8 +897,6 @@ async def on_pyrogram_message(user_id: int, pyrogram_client_instance, message) -
     _reply_locks[key] = True
     try:
         # Показываем пользователю что бот работает
-        user = await get_user(user_id)
-        lang = user.get("language_code") if user else None
         probe_text = await get_system_message(lang, "draft_typing")
         _bot_draft_echoes[key] = probe_text
         await pyrogram_client.set_draft(user_id, chat_id, probe_text)
@@ -917,10 +928,14 @@ async def on_pyrogram_message(user_id: int, pyrogram_client_instance, message) -
 
         # Генерируем ответ
         kwargs: dict = {}
-        if user_settings.get("pro_model"):
-            kwargs["model"] = LLM_MODEL_PRO
-        custom_prompt = user_settings.get("custom_prompt", "")
         style = user_settings.get("style")
+        if user_settings.get("pro_model"):
+            pro_model = STYLE_PRO_MODELS.get(style)
+            if pro_model is None:
+                print(f"{get_timestamp()} [PYROGRAM] WARNING: style {style!r} not in STYLE_PRO_MODELS, using default")
+                pro_model = STYLE_PRO_MODELS[None]
+            kwargs["model"] = pro_model
+        custom_prompt = user_settings.get("custom_prompt", "")
         tz_offset = user_settings.get("tz_offset", 0) or 0
         reply_text = await generate_reply(history, user, opponent_info, custom_prompt=custom_prompt, style=style, tz_offset=tz_offset, **kwargs)
         if not reply_text or not reply_text.strip():
@@ -962,9 +977,9 @@ async def _regenerate_reply(user_id: int, chat_id: int) -> None:
 
     _reply_locks[key] = True
     try:
-        user_settings = await get_user_settings(user_id)
         user = await get_user(user_id)
-        lang = user.get("language_code") if user else None
+        user_settings = (user or {}).get("settings") or {}
+        lang = (user or {}).get("language_code")
 
         # Показываем пробу
         probe_text = await get_system_message(lang, "draft_typing")
@@ -989,10 +1004,14 @@ async def _regenerate_reply(user_id: int, chat_id: int) -> None:
 
         # Генерируем ответ
         kwargs: dict = {}
-        if user_settings.get("pro_model"):
-            kwargs["model"] = LLM_MODEL_PRO
-        custom_prompt = user_settings.get("custom_prompt", "")
         style = user_settings.get("style")
+        if user_settings.get("pro_model"):
+            pro_model = STYLE_PRO_MODELS.get(style)
+            if pro_model is None:
+                print(f"{get_timestamp()} [PYROGRAM] WARNING: style {style!r} not in STYLE_PRO_MODELS, using default")
+                pro_model = STYLE_PRO_MODELS[None]
+            kwargs["model"] = pro_model
+        custom_prompt = user_settings.get("custom_prompt", "")
         tz_offset = user_settings.get("tz_offset", 0) or 0
         reply_text = await generate_reply(
             history, user, opponent_info,
@@ -1097,8 +1116,10 @@ async def on_pyrogram_draft(user_id: int, chat_id: int, draft_text: str) -> None
         _cancel_auto_reply(key)
         return
 
-    # Проверяем настройку drafts_enabled
-    user_settings = await get_user_settings(user_id)
+    # Проверяем настройки пользователя одним запросом
+    user = await get_user(user_id)
+    user_settings = (user or {}).get("settings") or {}
+    lang = (user or {}).get("language_code")
     if not user_settings.get("drafts_enabled", True):
         if DEBUG_PRINT:
             print(f"{get_timestamp()} [PYROGRAM] Drafts disabled for user {user_id}, skipping draft")
@@ -1116,8 +1137,6 @@ async def on_pyrogram_draft(user_id: int, chat_id: int, draft_text: str) -> None
         )
 
     # Сохраняем инструкцию и ставим пробу (статус-сообщение)
-    user = await get_user(user_id)
-    lang = user.get("language_code") if user else None
     probe_text = await get_system_message(lang, "draft_typing")
     _pending_drafts[key] = instruction
     _bot_draft_echoes[key] = probe_text
@@ -1167,16 +1186,21 @@ async def on_pyrogram_draft(user_id: int, chat_id: int, draft_text: str) -> None
         user_message += f"INSTRUCTION: {instruction}"
 
         # Генерируем ответ
+        style = user_settings.get("style")
         gen_kwargs: dict = {
             "user_message": user_message,
             "system_prompt": build_draft_prompt(
                 has_history=bool(history),
                 custom_prompt=user_settings.get("custom_prompt", ""),
-                style=user_settings.get("style"),
+                style=style,
             ),
         }
         if user_settings.get("pro_model"):
-            gen_kwargs["model"] = LLM_MODEL_PRO
+            pro_model = STYLE_PRO_MODELS.get(style)
+            if pro_model is None:
+                print(f"{get_timestamp()} [DRAFT] WARNING: style {style!r} not in STYLE_PRO_MODELS, using default")
+                pro_model = STYLE_PRO_MODELS[None]
+            gen_kwargs["model"] = pro_model
         response = await generate_response(**gen_kwargs)
         if not response or not response.strip():
             return

@@ -39,7 +39,7 @@ class TestOnSettings:
     @pytest.mark.asyncio
     async def test_shows_default_settings(self, mock_update, mock_context):
         """Показывает настройки по умолчанию (drafts ON, FREE model)."""
-        with patch("handlers.settings_handler.get_user_settings", new_callable=AsyncMock, return_value={}), \
+        with patch("handlers.settings_handler.ensure_effective_user", new_callable=AsyncMock, return_value={"settings": {}}), \
              patch("handlers.settings_handler.get_system_message", new_callable=AsyncMock, return_value=TITLE), \
              patch("handlers.settings_handler.get_system_messages", new_callable=AsyncMock, return_value=MESSAGES):
             await on_settings(mock_update, mock_context)
@@ -57,7 +57,7 @@ class TestOnSettings:
     async def test_shows_custom_settings(self, mock_update, mock_context):
         """Показывает сохранённые настройки (drafts OFF, PRO model)."""
         settings = {"drafts_enabled": False, "pro_model": True}
-        with patch("handlers.settings_handler.get_user_settings", new_callable=AsyncMock, return_value=settings), \
+        with patch("handlers.settings_handler.ensure_effective_user", new_callable=AsyncMock, return_value={"settings": settings}), \
              patch("handlers.settings_handler.get_system_message", new_callable=AsyncMock, return_value=TITLE), \
              patch("handlers.settings_handler.get_system_messages", new_callable=AsyncMock, return_value=MESSAGES):
             await on_settings(mock_update, mock_context)
@@ -71,7 +71,7 @@ class TestOnSettings:
     async def test_invalid_auto_reply_is_shown_as_off(self, mock_update, mock_context):
         """Невалидный auto_reply отображается как OFF."""
         settings = {"auto_reply": 86400}
-        with patch("handlers.settings_handler.get_user_settings", new_callable=AsyncMock, return_value=settings), \
+        with patch("handlers.settings_handler.ensure_effective_user", new_callable=AsyncMock, return_value={"settings": settings}), \
              patch("handlers.settings_handler.get_system_message", new_callable=AsyncMock, return_value=TITLE), \
              patch("handlers.settings_handler.get_system_messages", new_callable=AsyncMock, return_value=MESSAGES):
             await on_settings(mock_update, mock_context)
@@ -83,7 +83,7 @@ class TestOnSettings:
     async def test_shows_prompt_preview(self, mock_update, mock_context):
         """При установленном промпте — превью в тексте сообщения."""
         settings = {"custom_prompt": "Be concise and friendly"}
-        with patch("handlers.settings_handler.get_user_settings", new_callable=AsyncMock, return_value=settings), \
+        with patch("handlers.settings_handler.ensure_effective_user", new_callable=AsyncMock, return_value={"settings": settings}), \
              patch("handlers.settings_handler.get_system_message", new_callable=AsyncMock, return_value=TITLE), \
              patch("handlers.settings_handler.get_system_messages", new_callable=AsyncMock, return_value=MESSAGES):
             await on_settings(mock_update, mock_context)
@@ -109,35 +109,59 @@ class TestOnSettingsCallback:
         """Переключает drafts_enabled из ON в OFF."""
         mock_callback_update.callback_query.data = "settings:drafts"
 
-        with patch("handlers.settings_handler.get_user_settings", new_callable=AsyncMock,
-                    side_effect=[{"drafts_enabled": True}, {"drafts_enabled": False}]), \
-             patch("handlers.settings_handler.update_user_settings", new_callable=AsyncMock, return_value=True) as mock_update, \
+        with patch("handlers.settings_handler.ensure_effective_user", new_callable=AsyncMock,
+                    return_value={"settings": {"drafts_enabled": True}}), \
+             patch("handlers.settings_handler.update_user_settings", new_callable=AsyncMock, return_value={"drafts_enabled": False}) as mock_update, \
              patch("handlers.settings_handler.get_system_messages", new_callable=AsyncMock, return_value=MESSAGES):
             await on_settings_callback(mock_callback_update, mock_context)
 
-        mock_update.assert_called_once_with(mock_callback_update.effective_user.id, {"drafts_enabled": False})
+        mock_update.assert_called_once_with(
+            mock_callback_update.effective_user.id,
+            {"drafts_enabled": False},
+            current_settings={"drafts_enabled": True},
+        )
 
     @pytest.mark.asyncio
     async def test_toggles_model_free_to_pro(self, mock_callback_update, mock_context):
         """Переключает модель из FREE в PRO."""
         mock_callback_update.callback_query.data = "settings:model"
 
-        with patch("handlers.settings_handler.get_user_settings", new_callable=AsyncMock,
-                    side_effect=[{}, {"pro_model": True}]), \
-             patch("handlers.settings_handler.update_user_settings", new_callable=AsyncMock, return_value=True) as mock_update, \
+        with patch("handlers.settings_handler.ensure_effective_user", new_callable=AsyncMock,
+                    return_value={"settings": {}}), \
+             patch("handlers.settings_handler.update_user_settings", new_callable=AsyncMock, return_value={"pro_model": True}) as mock_update, \
              patch("handlers.settings_handler.get_system_messages", new_callable=AsyncMock, return_value=MESSAGES):
             await on_settings_callback(mock_callback_update, mock_context)
 
-        mock_update.assert_called_once_with(mock_callback_update.effective_user.id, {"pro_model": True})
+        mock_update.assert_called_once_with(
+            mock_callback_update.effective_user.id,
+            {"pro_model": True},
+            current_settings={},
+        )
         keyboard = mock_callback_update.callback_query.edit_message_text.call_args.kwargs["reply_markup"]
         assert keyboard.inline_keyboard[1][0].text == "🤖 Model: ⭐ PRO"
+
+    @pytest.mark.asyncio
+    async def test_toggles_model_for_new_user_after_ensure(self, mock_callback_update, mock_context):
+        """Для нового пользователя после ensure работает обычное сохранение с current_settings."""
+        mock_callback_update.callback_query.data = "settings:model"
+
+        with patch("handlers.settings_handler.ensure_effective_user", new_callable=AsyncMock, return_value={"settings": {}}), \
+             patch("handlers.settings_handler.update_user_settings", new_callable=AsyncMock, return_value={"pro_model": True}) as mock_update, \
+             patch("handlers.settings_handler.get_system_messages", new_callable=AsyncMock, return_value=MESSAGES):
+            await on_settings_callback(mock_callback_update, mock_context)
+
+        mock_update.assert_called_once_with(
+            mock_callback_update.effective_user.id,
+            {"pro_model": True},
+            current_settings={},
+        )
 
     @pytest.mark.asyncio
     async def test_ignores_unknown_callback(self, mock_callback_update, mock_context):
         """Игнорирует неизвестный callback data."""
         mock_callback_update.callback_query.data = "settings:unknown"
 
-        with patch("handlers.settings_handler.get_user_settings", new_callable=AsyncMock, return_value={}), \
+        with patch("handlers.settings_handler.ensure_effective_user", new_callable=AsyncMock, return_value={"settings": {}}), \
              patch("handlers.settings_handler.update_user_settings", new_callable=AsyncMock) as mock_update:
             await on_settings_callback(mock_callback_update, mock_context)
 
@@ -148,8 +172,8 @@ class TestOnSettingsCallback:
         """При сбое сохранения отправляет ошибку вместо ложного успеха."""
         mock_callback_update.callback_query.data = "settings:drafts"
 
-        with patch("handlers.settings_handler.get_user_settings", new_callable=AsyncMock, return_value={}), \
-             patch("handlers.settings_handler.update_user_settings", new_callable=AsyncMock, return_value=False), \
+        with patch("handlers.settings_handler.ensure_effective_user", new_callable=AsyncMock, return_value={"settings": {}}), \
+             patch("handlers.settings_handler.update_user_settings", new_callable=AsyncMock, return_value=None), \
              patch("handlers.settings_handler.get_system_message", new_callable=AsyncMock, return_value="Ошибка"):
             await on_settings_callback(mock_callback_update, mock_context)
 
@@ -160,13 +184,17 @@ class TestOnSettingsCallback:
         """Переключает auto_reply по кругу: None → 60 → 300 → ..."""
         mock_callback_update.callback_query.data = "settings:auto_reply"
 
-        with patch("handlers.settings_handler.get_user_settings", new_callable=AsyncMock,
-                    side_effect=[{}, {"auto_reply": 60}]), \
-             patch("handlers.settings_handler.update_user_settings", new_callable=AsyncMock, return_value=True) as mock_update, \
+        with patch("handlers.settings_handler.ensure_effective_user", new_callable=AsyncMock,
+                    return_value={"settings": {}}), \
+             patch("handlers.settings_handler.update_user_settings", new_callable=AsyncMock, return_value={"auto_reply": 60}) as mock_update, \
              patch("handlers.settings_handler.get_system_messages", new_callable=AsyncMock, return_value=MESSAGES):
             await on_settings_callback(mock_callback_update, mock_context)
 
-        mock_update.assert_called_once_with(mock_callback_update.effective_user.id, {"auto_reply": 60})
+        mock_update.assert_called_once_with(
+            mock_callback_update.effective_user.id,
+            {"auto_reply": 60},
+            current_settings={},
+        )
         keyboard = mock_callback_update.callback_query.edit_message_text.call_args.kwargs["reply_markup"]
         assert keyboard.inline_keyboard[4][0].text == "⏰ Auto-reply: 1 min"
 
@@ -180,13 +208,17 @@ class TestOnSettingsCallback:
         expected_msg_key = STYLE_OPTIONS[next_style]
         expected_label = MESSAGES[expected_msg_key]
 
-        with patch("handlers.settings_handler.get_user_settings", new_callable=AsyncMock,
-                    side_effect=[{}, {"style": next_style}]), \
-             patch("handlers.settings_handler.update_user_settings", new_callable=AsyncMock, return_value=True) as mock_update, \
+        with patch("handlers.settings_handler.ensure_effective_user", new_callable=AsyncMock,
+                    return_value={"settings": {}}), \
+             patch("handlers.settings_handler.update_user_settings", new_callable=AsyncMock, return_value={"style": next_style}) as mock_update, \
              patch("handlers.settings_handler.get_system_messages", new_callable=AsyncMock, return_value=MESSAGES):
             await on_settings_callback(mock_callback_update, mock_context)
 
-        mock_update.assert_called_once_with(mock_callback_update.effective_user.id, {"style": next_style})
+        mock_update.assert_called_once_with(
+            mock_callback_update.effective_user.id,
+            {"style": next_style},
+            current_settings={},
+        )
         keyboard = mock_callback_update.callback_query.edit_message_text.call_args.kwargs["reply_markup"]
         assert keyboard.inline_keyboard[3][0].text == expected_label
 
@@ -195,26 +227,34 @@ class TestOnSettingsCallback:
         """Переключает tz_offset: 0 → 1."""
         mock_callback_update.callback_query.data = "settings:timezone"
 
-        with patch("handlers.settings_handler.get_user_settings", new_callable=AsyncMock,
-                    side_effect=[{"tz_offset": 0}, {"tz_offset": 1}]), \
-             patch("handlers.settings_handler.update_user_settings", new_callable=AsyncMock, return_value=True) as mock_update, \
+        with patch("handlers.settings_handler.ensure_effective_user", new_callable=AsyncMock,
+                    return_value={"settings": {"tz_offset": 0}}), \
+             patch("handlers.settings_handler.update_user_settings", new_callable=AsyncMock, return_value={"tz_offset": 1}) as mock_update, \
              patch("handlers.settings_handler.get_system_messages", new_callable=AsyncMock, return_value=MESSAGES):
             await on_settings_callback(mock_callback_update, mock_context)
 
-        mock_update.assert_called_once_with(mock_callback_update.effective_user.id, {"tz_offset": 1})
+        mock_update.assert_called_once_with(
+            mock_callback_update.effective_user.id,
+            {"tz_offset": 1},
+            current_settings={"tz_offset": 0},
+        )
 
     @pytest.mark.asyncio
     async def test_timezone_wraps_around(self, mock_callback_update, mock_context):
         """tz_offset=13 → следующий -12 (wrap-around)."""
         mock_callback_update.callback_query.data = "settings:timezone"
 
-        with patch("handlers.settings_handler.get_user_settings", new_callable=AsyncMock,
-                    side_effect=[{"tz_offset": 13}, {"tz_offset": -12}]), \
-             patch("handlers.settings_handler.update_user_settings", new_callable=AsyncMock, return_value=True) as mock_update, \
+        with patch("handlers.settings_handler.ensure_effective_user", new_callable=AsyncMock,
+                    return_value={"settings": {"tz_offset": 13}}), \
+             patch("handlers.settings_handler.update_user_settings", new_callable=AsyncMock, return_value={"tz_offset": -12}) as mock_update, \
              patch("handlers.settings_handler.get_system_messages", new_callable=AsyncMock, return_value=MESSAGES):
             await on_settings_callback(mock_callback_update, mock_context)
 
-        mock_update.assert_called_once_with(mock_callback_update.effective_user.id, {"tz_offset": -12})
+        mock_update.assert_called_once_with(
+            mock_callback_update.effective_user.id,
+            {"tz_offset": -12},
+            current_settings={"tz_offset": 13},
+        )
 
 
 class TestTimezoneHelpers:

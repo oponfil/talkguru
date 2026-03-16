@@ -15,7 +15,7 @@ class TestOnStart:
     @pytest.mark.asyncio
     async def test_upserts_user(self, mock_update, mock_context):
         """Сохраняет пользователя в БД."""
-        with patch("handlers.bot_handlers.upsert_user", new_callable=AsyncMock) as mock_upsert, \
+        with patch("handlers.bot_handlers.upsert_effective_user", new_callable=AsyncMock, return_value=True) as mock_upsert, \
              patch("handlers.bot_handlers.update_tg_rating", new_callable=AsyncMock), \
              patch("handlers.bot_handlers.extract_rating_from_chat", return_value=None), \
              patch("handlers.bot_handlers.get_system_message", new_callable=AsyncMock, return_value="Hi!"), \
@@ -24,14 +24,11 @@ class TestOnStart:
             await on_start(mock_update, mock_context)
 
         mock_upsert.assert_called_once()
-        call_kwargs = mock_upsert.call_args[1]
-        assert call_kwargs["user_id"] == mock_update.effective_user.id
-        assert call_kwargs["username"] == mock_update.effective_user.username
 
     @pytest.mark.asyncio
     async def test_sends_greeting(self, mock_update, mock_context):
         """Отправляет приветствие на языке пользователя."""
-        with patch("handlers.bot_handlers.upsert_user", new_callable=AsyncMock), \
+        with patch("handlers.bot_handlers.upsert_effective_user", new_callable=AsyncMock, return_value=True), \
              patch("handlers.bot_handlers.update_tg_rating", new_callable=AsyncMock), \
              patch("handlers.bot_handlers.extract_rating_from_chat", return_value=None), \
              patch("handlers.bot_handlers.get_system_message", new_callable=AsyncMock, return_value="Привет!"), \
@@ -44,7 +41,7 @@ class TestOnStart:
     @pytest.mark.asyncio
     async def test_updates_tg_rating(self, mock_update, mock_context):
         """Обновляет tg_rating через getChat."""
-        with patch("handlers.bot_handlers.upsert_user", new_callable=AsyncMock), \
+        with patch("handlers.bot_handlers.upsert_effective_user", new_callable=AsyncMock, return_value=True), \
              patch("handlers.bot_handlers.update_tg_rating", new_callable=AsyncMock) as mock_rating, \
              patch("handlers.bot_handlers.extract_rating_from_chat", return_value=5), \
              patch("handlers.bot_handlers.get_system_message", new_callable=AsyncMock, return_value="Hi!"), \
@@ -57,7 +54,7 @@ class TestOnStart:
     @pytest.mark.asyncio
     async def test_updates_user_menu(self, mock_update, mock_context):
         """Устанавливает меню команд с учётом статуса подключения."""
-        with patch("handlers.bot_handlers.upsert_user", new_callable=AsyncMock), \
+        with patch("handlers.bot_handlers.upsert_effective_user", new_callable=AsyncMock, return_value=True), \
              patch("handlers.bot_handlers.update_tg_rating", new_callable=AsyncMock), \
              patch("handlers.bot_handlers.extract_rating_from_chat", return_value=None), \
              patch("handlers.bot_handlers.get_system_message", new_callable=AsyncMock, return_value="Hi!"), \
@@ -91,7 +88,8 @@ class TestOnText:
         """Генерирует ответ и отправляет."""
         mock_update.message.text = "Привет!"
 
-        with patch("handlers.bot_handlers.update_last_msg_at", new_callable=AsyncMock), \
+        with patch("handlers.bot_handlers.ensure_effective_user", new_callable=AsyncMock, return_value={"settings": {}}), \
+             patch("handlers.bot_handlers.update_last_msg_at", new_callable=AsyncMock), \
              patch("handlers.bot_handlers.generate_response", new_callable=AsyncMock, return_value="Ответ"):
 
             await on_text(mock_update, mock_context)
@@ -109,8 +107,8 @@ class TestOnText:
         ]
 
         with patch("handlers.bot_handlers.MAX_CONTEXT_MESSAGES", 2), \
+             patch("handlers.bot_handlers.ensure_effective_user", new_callable=AsyncMock, return_value={"settings": {}}), \
              patch("handlers.bot_handlers.update_last_msg_at", new_callable=AsyncMock), \
-             patch("handlers.bot_handlers.get_user_settings", new_callable=AsyncMock, return_value={}), \
              patch("handlers.bot_handlers.generate_response", new_callable=AsyncMock, return_value="Ответ") as mock_generate:
             await on_text(mock_update, mock_context)
 
@@ -131,7 +129,8 @@ class TestOnText:
         """Ошибка генерации → отправляет error message."""
         mock_update.message.text = "Test"
 
-        with patch("handlers.bot_handlers.update_last_msg_at", new_callable=AsyncMock), \
+        with patch("handlers.bot_handlers.ensure_effective_user", new_callable=AsyncMock, return_value={"settings": {}}), \
+             patch("handlers.bot_handlers.update_last_msg_at", new_callable=AsyncMock), \
              patch("handlers.bot_handlers.generate_response", new_callable=AsyncMock, side_effect=Exception("API fail")), \
              patch("handlers.bot_handlers.get_system_message", new_callable=AsyncMock, return_value="Ошибка"):
 
@@ -144,7 +143,8 @@ class TestOnText:
         """Обновляет last_msg_at."""
         mock_update.message.text = "Hello"
 
-        with patch("handlers.bot_handlers.update_last_msg_at", new_callable=AsyncMock) as mock_update_msg, \
+        with patch("handlers.bot_handlers.ensure_effective_user", new_callable=AsyncMock, return_value={"settings": {}}), \
+             patch("handlers.bot_handlers.update_last_msg_at", new_callable=AsyncMock) as mock_update_msg, \
              patch("handlers.bot_handlers.generate_response", new_callable=AsyncMock, return_value="Reply"):
 
             await on_text(mock_update, mock_context)

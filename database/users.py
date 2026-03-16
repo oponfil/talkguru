@@ -9,6 +9,10 @@ from utils.session_crypto import decrypt_session_string, encrypt_session_string
 from utils.utils import get_timestamp
 
 
+class UserStorageError(RuntimeError):
+    """Ошибка чтения/создания пользователя в БД."""
+
+
 async def upsert_user(
     user_id: int,
     username: Optional[str] = None,
@@ -17,7 +21,7 @@ async def upsert_user(
     is_bot: bool = False,
     is_premium: bool = False,
     language_code: Optional[str] = None,
-) -> None:
+) -> bool:
     """Создаёт или обновляет пользователя в БД.
 
     При первом контакте создаёт запись с first_seen.
@@ -43,8 +47,10 @@ async def upsert_user(
 
         if DEBUG_PRINT:
             print(f"{get_timestamp()} [DB] Upsert user {user_id} (@{username})")
+        return True
     except Exception as e:
         print(f"{get_timestamp()} [DB] ERROR upsert_user {user_id}: {e}")
+        return False
 
 
 async def update_last_msg_at(user_id: int) -> None:
@@ -182,28 +188,74 @@ async def get_user(user_id: int) -> Optional[dict]:
         return None
     except Exception as e:
         print(f"{get_timestamp()} [DB] ERROR get_user {user_id}: {e}")
-        return None
+        raise UserStorageError(f"Failed to read user {user_id}") from e
 
 
-async def get_user_settings(user_id: int) -> dict:
-    """Возвращает настройки пользователя (или пустой dict)."""
+async def ensure_user_exists(
+    user_id: int,
+    username: Optional[str] = None,
+    first_name: Optional[str] = None,
+    last_name: Optional[str] = None,
+    is_bot: bool = False,
+    is_premium: bool = False,
+    language_code: Optional[str] = None,
+) -> dict:
+    """Возвращает пользователя, создавая запись при отсутствии.
+
+    Raises:
+        UserStorageError: если чтение или создание пользователя не удалось.
+    """
     user = await get_user(user_id)
-    return (user or {}).get("settings") or {}
+    if user is not None:
+        return user
+
+    created = await upsert_user(
+        user_id=user_id,
+        username=username,
+        first_name=first_name,
+        last_name=last_name,
+        is_bot=is_bot,
+        is_premium=is_premium,
+        language_code=language_code,
+    )
+    if not created:
+        raise UserStorageError(f"Failed to create user {user_id}")
+
+    return {
+        "user_id": user_id,
+        "username": username,
+        "first_name": first_name,
+        "last_name": last_name,
+        "is_bot": is_bot,
+        "is_premium": is_premium,
+        "language_code": language_code,
+        "settings": {},
+    }
 
 
-async def update_user_settings(user_id: int, settings: dict) -> bool:
+
+async def update_user_settings(user_id: int, settings: dict, *, current_settings: dict | None = None) -> dict | None:
     """Обновляет настройки пользователя (merge с существующими).
 
     Args:
         user_id: ID пользователя
         settings: Словарь с обновляемыми ключами (не перезаписывает остальные)
+        current_settings: Текущие настройки (если уже прочитаны). Пропускает лишний read.
+
+    Returns:
+        Merged-настройки при успехе, None при ошибке.
     """
     try:
-        user = await get_user(user_id)
-        current = (user or {}).get("settings") or {}
+        if current_settings is not None:
+            current = current_settings
+            user_exists = True
+        else:
+            user = await get_user(user_id)
+            current = (user or {}).get("settings") or {}
+            user_exists = user is not None
         merged = {**current, **settings}
 
-        if user is None:
+        if not user_exists:
             await run_supabase(
                 lambda: supabase.table("users").upsert(
                     {"user_id": user_id, "settings": merged},
@@ -223,8 +275,8 @@ async def update_user_settings(user_id: int, settings: dict) -> bool:
             if cp and len(cp) > 30:
                 log_settings["custom_prompt"] = cp[:30] + "…"
             print(f"{get_timestamp()} [DB] Settings updated for user {user_id}: {log_settings}")
-        return True
+        return merged
     except Exception as e:
         print(f"{get_timestamp()} [DB] ERROR update_user_settings {user_id}: {e}")
-        return False
+        return None
 

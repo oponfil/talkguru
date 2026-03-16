@@ -6,8 +6,9 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
 from config import AUTO_REPLY_OPTIONS, DEBUG_PRINT, STYLE_OPTIONS, TIMEZONE_OFFSETS
-from database.users import get_user_settings, update_user_settings
+from database.users import update_user_settings
 from system_messages import get_system_message, get_system_messages
+from utils.telegram_user import ensure_effective_user
 from utils.utils import get_timestamp, normalize_auto_reply, typing_action
 
 
@@ -79,7 +80,14 @@ async def on_settings(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     """Обработчик команды /settings — показывает настройки с Inline-кнопками."""
     u = update.effective_user
 
-    settings = await get_user_settings(u.id)
+    try:
+        user = await ensure_effective_user(update)
+    except Exception:
+        error_msg = await get_system_message(u.language_code, "error")
+        await update.message.reply_text(error_msg)
+        return
+
+    settings = user.get("settings") or {}
     title = await get_system_message(u.language_code, "settings_title")
 
     messages = await get_system_messages(u.language_code)
@@ -100,25 +108,43 @@ async def on_settings_callback(update: Update, context: ContextTypes.DEFAULT_TYP
 
     await query.answer()
 
-    settings = await get_user_settings(u.id)
+    try:
+        user = await ensure_effective_user(update)
+    except Exception:
+        await _send_settings_error(query, u.language_code)
+        return
+
+    settings = user.get("settings") or {}
 
     if action == "settings:drafts":
         current = settings.get("drafts_enabled", True)
-        updated = await update_user_settings(u.id, {"drafts_enabled": not current})
-        if not updated:
+        updated_settings = await update_user_settings(
+            u.id,
+            {"drafts_enabled": not current},
+            current_settings=settings,
+        )
+        if updated_settings is None:
             await _send_settings_error(query, u.language_code)
             return
     elif action == "settings:model":
         current = settings.get("pro_model", False)
-        updated = await update_user_settings(u.id, {"pro_model": not current})
-        if not updated:
+        updated_settings = await update_user_settings(
+            u.id,
+            {"pro_model": not current},
+            current_settings=settings,
+        )
+        if updated_settings is None:
             await _send_settings_error(query, u.language_code)
             return
     elif action == "settings:prompt":
         # Если промпт уже установлен — очищаем, иначе запрашиваем ввод
         if settings.get("custom_prompt"):
-            updated = await update_user_settings(u.id, {"custom_prompt": ""})
-            if not updated:
+            updated_settings = await update_user_settings(
+                u.id,
+                {"custom_prompt": ""},
+                current_settings=settings,
+            )
+            if updated_settings is None:
                 await _send_settings_error(query, u.language_code)
                 return
         else:
@@ -134,8 +160,12 @@ async def on_settings_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         options = list(AUTO_REPLY_OPTIONS)
         idx = options.index(current)
         next_value = options[(idx + 1) % len(options)]
-        updated = await update_user_settings(u.id, {"auto_reply": next_value})
-        if not updated:
+        updated_settings = await update_user_settings(
+            u.id,
+            {"auto_reply": next_value},
+            current_settings=settings,
+        )
+        if updated_settings is None:
             await _send_settings_error(query, u.language_code)
             return
     elif action == "settings:style":
@@ -143,8 +173,12 @@ async def on_settings_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         options = list(STYLE_OPTIONS)
         idx = options.index(current) if current in options else 0
         next_value = options[(idx + 1) % len(options)]
-        updated = await update_user_settings(u.id, {"style": next_value})
-        if not updated:
+        updated_settings = await update_user_settings(
+            u.id,
+            {"style": next_value},
+            current_settings=settings,
+        )
+        if updated_settings is None:
             await _send_settings_error(query, u.language_code)
             return
     elif action == "settings:timezone":
@@ -154,15 +188,16 @@ async def on_settings_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         except ValueError:
             idx = TIMEZONE_OFFSETS.index(0)
         next_value = TIMEZONE_OFFSETS[(idx + 1) % len(TIMEZONE_OFFSETS)]
-        updated = await update_user_settings(u.id, {"tz_offset": next_value})
-        if not updated:
+        updated_settings = await update_user_settings(
+            u.id,
+            {"tz_offset": next_value},
+            current_settings=settings,
+        )
+        if updated_settings is None:
             await _send_settings_error(query, u.language_code)
             return
     else:
         return
-
-    # Перечитываем обновлённые настройки
-    updated_settings = await get_user_settings(u.id)
 
     messages = await get_system_messages(u.language_code)
 
