@@ -1,6 +1,6 @@
-# TalkGuru 🦉
+# DraftGuru 🦉
 
-Опенсорсный Telegram-бот, который пишет черновик ответа за вас. Попробовать: [@talkgurubot](https://t.me/talkgurubot)
+Опенсорсный Telegram-бот, который пишет черновик ответа за вас. Попробовать: [@DraftGuruBot](https://t.me/DraftGuruBot)
 🔞 Только для пользователей 18+.
 
 ## Как работает
@@ -22,8 +22,8 @@
 ### 1. Клонировать и установить зависимости
 
 ```bash
-git clone https://github.com/oponfil/talkguru.git
-cd TalkGuru
+git clone https://github.com/oponfil/draftguru.git
+cd draftguru
 pip install -r requirements.txt
 ```
 

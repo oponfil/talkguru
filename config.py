@@ -1,4 +1,4 @@
-# config.py — Константы и настройки TalkGuru
+# config.py — Константы и настройки DraftGuru
 
 import os
 

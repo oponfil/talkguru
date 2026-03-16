@@ -288,7 +288,7 @@ async def _start_qr_flow(
     client: Client | None = None
     try:
         client = Client(
-            name=f"talkguru_qr_{user_id}",
+            name=f"draftguru_qr_{user_id}",
             api_id=int(PYROGRAM_API_ID),
             api_hash=PYROGRAM_API_HASH,
             in_memory=True,
@@ -427,7 +427,7 @@ async def _handle_phone_number(
     try:
         # Создаём временного клиента Pyrogram
         client = Client(
-            name=f"talkguru_phone_{u.id}",
+            name=f"draftguru_phone_{u.id}",
             api_id=int(PYROGRAM_API_ID),
             api_hash=PYROGRAM_API_HASH,
             in_memory=True,

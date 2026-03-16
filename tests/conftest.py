@@ -1,4 +1,4 @@
-# tests/conftest.py — Общие фикстуры для тестов TalkGuru
+# tests/conftest.py — Общие фикстуры для тестов DraftGuru
 
 import os
 from unittest.mock import AsyncMock, MagicMock, patch

@@ -1,6 +1,6 @@
 # Coding Style Guide & Conventions
 
-Этот документ — **Style Guide** для проекта **TalkGuru**.
+Этот документ — **Style Guide** для проекта **DraftGuru**.
 Описывает стандарты кодирования, обязательные для соблюдения.
 
 ## 1. Импорты (Imports)

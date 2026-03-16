@@ -47,7 +47,7 @@ async def main():
     # 4. Спрашивает пароль 2FA в консоли (если нужно)
     # Это встроенная надежная механика Pyrogram
     async with Client(
-        name="talkguru_session_generator",
+        name="draftguru_session_generator",
         api_id=int(PYROGRAM_API_ID),
         api_hash=PYROGRAM_API_HASH,
         in_memory=True

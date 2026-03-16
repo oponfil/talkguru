@@ -57,7 +57,7 @@ def set_draft_callback(callback) -> None:
 async def create_client(user_id: int, session_string: str) -> Client:
     """Создаёт Pyrogram Client из session string."""
     client = Client(
-        name=f"talkguru_{user_id}",
+        name=f"draftguru_{user_id}",
         api_id=PYROGRAM_API_ID,
         api_hash=PYROGRAM_API_HASH,
         session_string=session_string,

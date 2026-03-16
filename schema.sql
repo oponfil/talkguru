@@ -1,5 +1,5 @@
 -- === schema.sql ===
--- Создание таблиц для проекта TalkGuru (Supabase/Postgres)
+-- Создание таблиц для проекта DraftGuru (Supabase/Postgres)
 
 -- ---------- USERS ----------
 create table if not exists public.users (

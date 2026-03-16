@@ -21,7 +21,7 @@ from utils.utils import get_timestamp
 # ====== Системные сообщения (на английском, переводятся для пользователя) ======
 SYSTEM_MESSAGES = {
     # — General —
-    "greeting": "👋 Hey! I'm TalkGuru — a bot that writes draft replies for you.\n\n1. 🔌 Connect your account via /connect (phone or QR code).\n2. 🦉 When someone messages you — I automatically compose a draft reply in the input field.\n3. ✏️ Write an instruction in the draft — I'll rewrite it as soon as you leave the chat.\n\n🔞 For users 18+ only.",
+    "greeting": "👋 Hey! I'm DraftGuru — a bot that writes draft replies for you.\n\n1. 🔌 Connect your account via /connect (phone or QR code).\n2. 🦉 When someone messages you — I automatically compose a draft reply in the input field.\n3. ✏️ Write an instruction in the draft — I'll rewrite it as soon as you leave the chat.\n\n🔞 For users 18+ only.",
     "error": "⚠️ An error occurred. Please try again later.",
 
     # — Connect / Disconnect —

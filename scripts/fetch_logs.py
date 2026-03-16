@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Скачивает логи продакшена TalkGuru из Railway для локального анализа.
+"""Скачивает логи продакшена DraftGuru из Railway для локального анализа.
 
 Требования:
     - Railway CLI: npm i -g @railway/cli
@@ -195,7 +195,7 @@ def print_summary(logs: str) -> None:
 def main() -> None:
     """Точка входа."""
     configure_stdio()
-    parser = argparse.ArgumentParser(description="Скачать логи продакшена TalkGuru из Railway")
+    parser = argparse.ArgumentParser(description="Скачать логи продакшена DraftGuru из Railway")
     parser.add_argument("-n", "--lines", type=int, default=500, help="Количество строк (по умолчанию 500)")
     parser.add_argument("--all", action="store_true", help=f"Все доступные логи (до {RAILWAY_LOG_LIMIT})")
     parser.add_argument("-s", "--since", type=str, default=None, help="Период: 30s, 5m, 2h, 1d, 1w")

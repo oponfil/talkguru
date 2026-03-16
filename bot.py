@@ -1,4 +1,4 @@
-# bot.py — Telegram-бот TalkGuru (запуск и конфигурация)
+# bot.py — Telegram-бот DraftGuru (запуск и конфигурация)
 
 import asyncio
 import os
@@ -52,7 +52,7 @@ def main() -> None:
         print("❌ BOT_TOKEN не задан! Установите его в .env")
         return
 
-    print(f"{get_timestamp()} [BOT] Starting TalkGuru bot...")
+    print(f"{get_timestamp()} [BOT] Starting DraftGuru bot...")
 
     # Устанавливаем callback-и для Pyrogram
     pyrogram_client.set_message_callback(on_pyrogram_message)
