@@ -30,7 +30,7 @@ def _build_timezone_label(offset: float) -> str:
     now_utc = datetime.now(timezone.utc)
     local_time = now_utc + timedelta(hours=offset)
     time_str = local_time.strftime("%H:%M")
-    return f"🕐 Time: {time_str} (UTC{_format_tz_offset(offset)})"
+    return f"🕐 {time_str} (UTC{_format_tz_offset(offset)})"
 
 
 def _build_settings_keyboard(settings: dict, messages: dict) -> InlineKeyboardMarkup:
@@ -57,7 +57,7 @@ def _build_settings_keyboard(settings: dict, messages: dict) -> InlineKeyboardMa
         [InlineKeyboardButton(auto_label, callback_data="settings:auto_reply")],
         [
             InlineKeyboardButton("⏪", callback_data="settings:timezone_back"),
-            InlineKeyboardButton(f"{tz_label} ⏩️", callback_data="settings:timezone"),
+            InlineKeyboardButton(f"{tz_label} ⏩", callback_data="settings:timezone"),
         ],
     ]
     return InlineKeyboardMarkup(keyboard)
