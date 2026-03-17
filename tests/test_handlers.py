@@ -29,7 +29,8 @@ from handlers.pyrogram_handlers import (
 from system_messages import SYSTEM_MESSAGES
 from utils.bot_utils import update_user_menu
 
-TYPING_TEXT = SYSTEM_MESSAGES["draft_typing"]
+from config import DEFAULT_STYLE, STYLE_TO_EMOJI
+TYPING_TEXT = SYSTEM_MESSAGES["draft_typing"].format(emoji=STYLE_TO_EMOJI[DEFAULT_STYLE])
 
 
 def _close_coroutine_task(coro):
@@ -802,9 +803,61 @@ class TestOnPyrogramDraft:
 
         # Первый вызов — проба (статус), второй — AI-ответ
         assert mock_pc.set_draft.call_count == 2
-        mock_pc.set_draft.assert_any_call(123, 456, TYPING_TEXT)
         mock_pc.set_draft.assert_any_call(123, 456, "AI ответ")
         mock_gen.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_emoji_shortcut_resets_style(self):
+        """Эмодзи стиля, совпадающего с глобальным, сбрасывает per-chat настройку (передает None)."""
+        _bot_drafts.pop((123, 456), None)
+        _pending_drafts.pop((123, 456), None)
+        
+        global_style = "romance"
+        emoji = STYLE_TO_EMOJI[global_style]
+        
+        with patch("handlers.pyrogram_handlers.pyrogram_client") as mock_pc, \
+             patch("handlers.pyrogram_handlers.generate_response", new_callable=AsyncMock) as mock_gen, \
+             patch("handlers.pyrogram_handlers.asyncio.sleep", new_callable=AsyncMock), \
+             patch("handlers.pyrogram_handlers.get_user", new_callable=AsyncMock, return_value={"language_code": "en", "settings": {"style": global_style}}), \
+             patch("handlers.pyrogram_handlers.get_system_message", new_callable=AsyncMock, return_value=TYPING_TEXT), \
+             patch("handlers.pyrogram_handlers.update_chat_style", new_callable=AsyncMock) as mock_update_style:
+            
+            mock_pc.read_chat_history = AsyncMock(return_value=[
+                {"role": "user", "text": "Привет"},
+            ])
+            mock_pc.set_draft = AsyncMock(return_value=True)
+            mock_gen.return_value = "AI ответ"
+
+            await on_pyrogram_draft(123, 456, f"{emoji} напиши стихи")
+
+        mock_update_style.assert_called_once_with(123, 456, None)
+
+    @pytest.mark.asyncio
+    async def test_emoji_only_clears_probe_when_history_is_empty(self):
+        """Только emoji без истории не должно оставлять вечный typing-пробник в draft."""
+        _bot_drafts.pop((123, 456), None)
+        _pending_drafts.pop((123, 456), None)
+
+        with patch("handlers.pyrogram_handlers.pyrogram_client") as mock_pc, \
+             patch("handlers.pyrogram_handlers.get_user", new_callable=AsyncMock, side_effect=[
+                 {"language_code": "en", "settings": {}},
+                 {"language_code": "en", "settings": {"chat_styles": {"456": "romance"}}},
+             ]), \
+             patch("handlers.pyrogram_handlers.get_system_message", new_callable=AsyncMock, return_value=SYSTEM_MESSAGES["draft_typing"]), \
+             patch("handlers.pyrogram_handlers.update_chat_style", new_callable=AsyncMock) as mock_update_style, \
+             patch("handlers.pyrogram_handlers.generate_reply", new_callable=AsyncMock) as mock_generate_reply:
+            mock_pc.read_chat_history = AsyncMock(return_value=[])
+            mock_pc.set_draft = AsyncMock(return_value=True)
+
+            await on_pyrogram_draft(123, 456, "💕")
+
+        mock_update_style.assert_called_once_with(123, 456, "romance")
+        mock_generate_reply.assert_not_called()
+        assert mock_pc.set_draft.call_count == 2
+        mock_pc.set_draft.assert_any_call(123, 456, "💕 is typing...")
+        mock_pc.set_draft.assert_any_call(123, 456, "")
+        assert (123, 456) not in _bot_draft_echoes
+        assert (123, 456) not in _bot_drafts
 
 
 class TestVerifyDraftDelivery:

@@ -269,7 +269,7 @@ class TestMain:
              patch("bot.pyrogram_client") as mock_pc:
             bot_module.main()
 
-        assert len(command_handlers) == 5
+        assert len(command_handlers) == 6
         assert len(message_handlers) == 2
         assert all(kwargs["filters"] is bot_module.PRIVATE_ONLY_FILTER for _, kwargs in command_handlers)
         assert "ChatType.PRIVATE" in repr(message_handlers[0][0][0])

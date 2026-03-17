@@ -1,11 +1,12 @@
 # handlers/bot_handlers.py — Обработчики команд Telegram Bot API (/start, on_text)
 
+import asyncio
 import traceback
 
 from telegram import Update
 from telegram.ext import ContextTypes
 
-from config import CUSTOM_PROMPT_MAX_LENGTH, DEBUG_PRINT, LLM_MODEL, MODEL_REASONING_EFFORT, STYLE_PRO_MODELS, MAX_CONTEXT_MESSAGES
+from config import CUSTOM_PROMPT_MAX_LENGTH, DEBUG_PRINT, DEFAULT_STYLE, LLM_MODEL, MODEL_REASONING_EFFORT, STYLE_PRO_MODELS, MAX_CONTEXT_MESSAGES
 from utils.utils import get_timestamp, typing_action
 from utils.bot_utils import update_user_menu
 from utils.telegram_user import ensure_effective_user, upsert_effective_user
@@ -32,6 +33,8 @@ async def on_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         error_msg = await get_system_message(u.language_code, "error")
         await update.message.reply_text(error_msg or SYSTEM_MESSAGES["error"])
         return
+
+    asyncio.create_task(update_last_msg_at(u.id))
 
     # Обновляем tg_rating (Telegram Stars) через getChat
     try:
@@ -85,7 +88,7 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         user = await ensure_effective_user(update)
 
         # Обновляем last_msg_at только после гарантированного наличия записи пользователя.
-        await update_last_msg_at(u.id)
+        asyncio.create_task(update_last_msg_at(u.id))
 
         # История сообщений в чате с ботом (хранится в context.chat_data)
         history: list[dict] = context.chat_data.setdefault("history", [])
@@ -99,7 +102,7 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         # Читаем настройки пользователя для выбора модели и стиля
         user_settings = (user or {}).get("settings") or {}
         style = user_settings.get("style")
-        model = STYLE_PRO_MODELS.get(style, STYLE_PRO_MODELS[None]) if user_settings.get("pro_model") else None
+        model = STYLE_PRO_MODELS.get(style, STYLE_PRO_MODELS[DEFAULT_STYLE]) if user_settings.get("pro_model") else None
         effective_model = model or LLM_MODEL
 
         # Генерируем ответ через OpenRouter с историей и стилем

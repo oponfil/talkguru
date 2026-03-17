@@ -3,7 +3,7 @@ from datetime import datetime, timedelta, timezone
 from functools import wraps
 from typing import Callable
 
-from config import AUTO_REPLY_OPTIONS
+from config import AUTO_REPLY_OPTIONS, DEFAULT_STYLE
 
 
 def get_timestamp() -> str:
@@ -144,4 +144,23 @@ def format_chat_history(
 def normalize_auto_reply(value: object) -> int | None:
     """Возвращает валидный auto_reply или None (OFF)."""
     return value if value in AUTO_REPLY_OPTIONS else None
+
+
+def get_effective_style(settings: dict, chat_id: int | None = None) -> str:
+    """Возвращает стиль для конкретного чата (per-chat override → глобальный дефолт).
+
+    Args:
+        settings: Настройки пользователя
+        chat_id: ID чата (None → глобальный стиль)
+
+    Returns:
+        Ключ стиля (по умолчанию 'userlike')
+    """
+    if chat_id is not None:
+        chat_styles = settings.get("chat_styles") or {}
+        per_chat = chat_styles.get(str(chat_id))
+        if per_chat:
+            return per_chat
+    return settings.get("style") or DEFAULT_STYLE
+
 

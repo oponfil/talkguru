@@ -11,6 +11,8 @@ from config import (
     CUSTOM_PROMPT_MAX_LENGTH,
     DEFAULT_LANGUAGE_CODE,
     DEBUG_PRINT,
+    EMOJI_TO_STYLE,
+    style_display_name,
     SYSTEM_MESSAGES_FALLBACK_TTL_SECONDS,
     SYSTEM_MESSAGE_TRANSLATION_TIMEOUT,
 )
@@ -71,7 +73,7 @@ SYSTEM_MESSAGES = {
     "menu_settings": "Settings",
 
     # — Drafts —
-    "draft_typing": "🦉 is typing...",
+    "draft_typing": "{emoji} is typing...",
 
     # — Settings —
     "settings_title": "⚙️ Settings\nTap buttons to change.",
@@ -92,14 +94,17 @@ SYSTEM_MESSAGES = {
     "settings_auto_reply_16h": "⏰ Auto-reply: ⚠️ 16 hours",
     "settings_timezone_back": "🕐 Time",
 
-    # — Settings: Style —
-    "settings_style_userlike": "🦉 Style: Userlike",        # 👤
-    "settings_style_romance": "💕 Style: Romance Guru",
-    "settings_style_business": "💼 Style: Business Guru",
-    "settings_style_sales": "💰 Style: Sales Guru",
-    "settings_style_friend": "🍻 Style: Friend Guru",       # 🍻
-    "settings_style_seducer": "😈 Style: Seducer Guru",
-    "settings_style_paranoid": "🕵️ Style: Paranoid Guru",
+    # — Settings: Style — (генерируется из EMOJI_TO_STYLE)
+    **{
+        f"settings_style_{style or 'userlike'}": f"{emoji} Style: {style_display_name(style)}"
+        for emoji, style in EMOJI_TO_STYLE.items()
+    },
+
+    # — Styles (per-chat) —
+    "menu_styles": "Chat styles",
+    "styles_title": "🎭 Chat Styles\nTap a chat to change its style.",
+    "styles_not_connected": "🔌 Connect your account first with /connect.",
+    "styles_no_chats": "No active chats found. Start a conversation first.",
 }
 
 

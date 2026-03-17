@@ -19,8 +19,12 @@ async def update_user_menu(bot, user_id: int, language_code: str | None, is_conn
 
         commands = [
             BotCommand("settings", messages.get("menu_settings", "Settings")),
-            BotCommand("status", messages.get("menu_status", "Connection status")),
         ]
+
+        if is_connected:
+            commands.append(BotCommand("styles", messages.get("menu_styles", "Chat styles")))
+
+        commands.append(BotCommand("status", messages.get("menu_status", "Connection status")))
 
         if is_connected:
             commands.append(BotCommand("disconnect", messages.get("menu_disconnect", "Disconnect account")))

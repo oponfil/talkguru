@@ -280,6 +280,44 @@ async def get_private_dialogs(user_id: int, limit: int = POLL_MISSED_DIALOGS_LIM
     return chat_ids
 
 
+async def get_dialog_info(user_id: int, limit: int) -> list[dict]:
+    """Возвращает инфо о последних диалогах, кроме Saved Messages.
+
+    Args:
+        user_id: Telegram user ID
+        limit: Максимальное количество диалогов
+
+    Returns:
+        [{chat_id, first_name, last_name, username, title}]
+    """
+    client = _active_clients.get(user_id)
+    if not client:
+        return []
+
+    dialogs: list[dict] = []
+    try:
+        async for dialog in client.get_dialogs():
+            chat = dialog.chat
+            if not chat:
+                continue
+            # Пропускаем Saved Messages
+            if chat.id == user_id:
+                continue
+            dialogs.append({
+                "chat_id": chat.id,
+                "first_name": chat.first_name or "",
+                "last_name": chat.last_name or "",
+                "username": chat.username or "",
+                "title": chat.title or "",
+            })
+            if len(dialogs) >= limit:
+                break
+    except Exception as e:
+        print(f"{get_timestamp()} [PYROGRAM] ERROR get_dialog_info for user {user_id}: {e}")
+
+    return dialogs
+
+
 def get_active_user_ids() -> list[int]:
     """Возвращает ID пользователей с активными Pyrogram-клиентами."""
     return list(_active_clients.keys())

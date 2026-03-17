@@ -1,5 +1,7 @@
 # prompts.py — Все промпты для ИИ
 
+from config import DEFAULT_STYLE
+
 # Промпт для общения с пользователем — используется в on_text (bot.py) через generate_response (openrouter.py)
 BOT_PROMPT = (
     "You are DraftGuru 🦉 — a wise owl guru. An open-source Telegram bot that writes draft replies for users.\n"
@@ -37,8 +39,8 @@ messages = {messages_json}
 # ====== Промпты для генерации ответов ======
 
 # Блоки промптов для каждого стиля общения
-STYLE_PROMPTS: dict[str | None, str] = {
-    None: "",
+STYLE_PROMPTS: dict[str, str] = {
+    "userlike": "",
 
     "romance": """\
 - You are a warm, poetic, and emotionally intelligent romantic. Your goal is to create a deep, cozy, and spellbinding connection.
@@ -134,7 +136,7 @@ def build_bot_chat_prompt(*, style: str | None = None) -> str:
     Args:
         style: Стиль общения (None = без дополнительного стиля)
     """
-    style_block = STYLE_PROMPTS.get(style, STYLE_PROMPTS[None])
+    style_block = STYLE_PROMPTS.get(style, STYLE_PROMPTS[DEFAULT_STYLE])
     style_rules = f"\n\nCOMMUNICATION STYLE:\n{style_block}" if style_block else ""
 
     return f"{BOT_PROMPT}{style_rules}\n\n{HUMAN_STYLE_RULES}"
@@ -147,7 +149,7 @@ def build_reply_prompt(*, custom_prompt: str = "", style: str | None = None) -> 
         custom_prompt: Пользовательский промпт из настроек
         style: Стиль общения (None = под пользователя)
     """
-    style_block = STYLE_PROMPTS.get(style, STYLE_PROMPTS[None])
+    style_block = STYLE_PROMPTS.get(style, STYLE_PROMPTS[DEFAULT_STYLE])
     style_rules = f"{style_block}\n" if style_block else ""
     prompt = f"""\
 You are the user in this conversation.
@@ -173,7 +175,7 @@ def build_draft_prompt(*, has_history: bool, custom_prompt: str = "", style: str
         custom_prompt: Пользовательский промпт из настроек
         style: Стиль общения (None = под пользователя)
     """
-    style_block = STYLE_PROMPTS.get(style, STYLE_PROMPTS[None])
+    style_block = STYLE_PROMPTS.get(style, STYLE_PROMPTS[DEFAULT_STYLE])
     style_rules = f"{style_block}\n" if style_block else ""
     prompt = f"""\
 You are the user in this conversation.

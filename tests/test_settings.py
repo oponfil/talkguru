@@ -49,9 +49,9 @@ class TestOnSettings:
         buttons = keyboard.inline_keyboard
         assert len(buttons) == 6
         assert buttons[0][0].text == MESSAGES["settings_model_free"]
-        assert buttons[1][0].text == MESSAGES["settings_drafts_on"]
-        assert buttons[2][0].text == MESSAGES["settings_prompt_empty"]
-        assert buttons[3][0].text == MESSAGES["settings_style_userlike"]
+        assert buttons[1][0].text == MESSAGES["settings_style_userlike"]
+        assert buttons[2][0].text == MESSAGES["settings_drafts_on"]
+        assert buttons[3][0].text == MESSAGES["settings_prompt_empty"]
         assert buttons[4][0].text == MESSAGES["settings_auto_reply_off"]
 
     @pytest.mark.asyncio
@@ -66,7 +66,7 @@ class TestOnSettings:
         keyboard = mock_update.message.reply_text.call_args.kwargs["reply_markup"]
         buttons = keyboard.inline_keyboard
         assert buttons[0][0].text == MESSAGES["settings_model_pro"]
-        assert buttons[1][0].text == MESSAGES["settings_drafts_off"]
+        assert buttons[2][0].text == MESSAGES["settings_drafts_off"]
 
     @pytest.mark.asyncio
     async def test_invalid_auto_reply_is_shown_as_off(self, mock_update, mock_context):
@@ -221,7 +221,7 @@ class TestOnSettingsCallback:
             current_settings={},
         )
         keyboard = mock_callback_update.callback_query.edit_message_text.call_args.kwargs["reply_markup"]
-        assert keyboard.inline_keyboard[3][0].text == expected_label
+        assert keyboard.inline_keyboard[1][0].text == expected_label
 
     @pytest.mark.asyncio
     async def test_cycles_timezone(self, mock_callback_update, mock_context):

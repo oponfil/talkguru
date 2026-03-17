@@ -31,6 +31,7 @@ from handlers.pyrogram_handlers import (  # noqa: E402
     poll_missed_messages,
 )
 from handlers.settings_handler import on_settings, on_settings_callback  # noqa: E402
+from handlers.styles_handler import on_styles, on_styles_callback  # noqa: E402
 from utils.pyrogram_utils import restore_sessions  # noqa: E402
 
 PRIVATE_ONLY_FILTER = filters.ChatType.PRIVATE
@@ -65,7 +66,9 @@ def main() -> None:
     app.add_handler(CommandHandler("start", on_start, filters=PRIVATE_ONLY_FILTER))
     app.add_handler(CommandHandler("connect", on_connect, filters=PRIVATE_ONLY_FILTER))
     app.add_handler(CommandHandler("settings", on_settings, filters=PRIVATE_ONLY_FILTER))
+    app.add_handler(CommandHandler("styles", on_styles, filters=PRIVATE_ONLY_FILTER))
     app.add_handler(CallbackQueryHandler(on_settings_callback, pattern=r"^settings:"))
+    app.add_handler(CallbackQueryHandler(on_styles_callback, pattern=r"^styles:"))
     app.add_handler(CommandHandler("status", on_status, filters=PRIVATE_ONLY_FILTER))
     app.add_handler(CommandHandler("disconnect", on_disconnect, filters=PRIVATE_ONLY_FILTER))
     app.add_handler(CallbackQueryHandler(on_connect_qr_callback, pattern=r"^connect:qr$"))

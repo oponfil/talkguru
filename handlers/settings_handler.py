@@ -1,12 +1,14 @@
 # handlers/settings_handler.py — Обработчик команды /settings
 
+import asyncio
+
 from datetime import datetime, timedelta, timezone
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
 from config import AUTO_REPLY_OPTIONS, DEBUG_PRINT, STYLE_OPTIONS, TIMEZONE_OFFSETS
-from database.users import update_user_settings
+from database.users import update_last_msg_at, update_user_settings
 from system_messages import get_system_message, get_system_messages
 from utils.telegram_user import ensure_effective_user
 from utils.utils import get_timestamp, normalize_auto_reply, typing_action
@@ -51,9 +53,9 @@ def _build_settings_keyboard(settings: dict, messages: dict) -> InlineKeyboardMa
 
     keyboard = [
         [InlineKeyboardButton(model_label, callback_data="settings:model")],
+        [InlineKeyboardButton(style_label, callback_data="settings:style")],
         [InlineKeyboardButton(drafts_label, callback_data="settings:drafts")],
         [InlineKeyboardButton(prompt_label, callback_data="settings:prompt")],
-        [InlineKeyboardButton(style_label, callback_data="settings:style")],
         [InlineKeyboardButton(auto_label, callback_data="settings:auto_reply")],
         [
             InlineKeyboardButton(f"⏪ {messages.get('settings_timezone_back', '🕐 Time')}", callback_data="settings:timezone_back"),
@@ -107,6 +109,8 @@ async def on_settings(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         error_msg = await get_system_message(u.language_code, "error")
         await update.message.reply_text(error_msg)
         return
+
+    asyncio.create_task(update_last_msg_at(u.id))
 
     settings = user.get("settings") or {}
     title = await get_system_message(u.language_code, "settings_title")

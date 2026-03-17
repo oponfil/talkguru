@@ -280,3 +280,29 @@ async def update_user_settings(user_id: int, settings: dict, *, current_settings
         print(f"{get_timestamp()} [DB] ERROR update_user_settings {user_id}: {e}")
         return None
 
+
+async def update_chat_style(user_id: int, chat_id: int, style: str | None) -> dict | None:
+    """Устанавливает стиль для конкретного чата (None = сброс на глобальный).
+
+    Args:
+        user_id: ID пользователя
+        chat_id: ID чата
+        style: Ключ стиля или None для сброса
+
+    Returns:
+        Merged-настройки при успехе, None при ошибке.
+    """
+    user = await get_user(user_id)
+    settings = (user or {}).get("settings") or {}
+    chat_styles = dict(settings.get("chat_styles") or {})
+
+    if style is None:
+        chat_styles.pop(str(chat_id), None)
+    else:
+        chat_styles[str(chat_id)] = style
+
+    return await update_user_settings(
+        user_id, {"chat_styles": chat_styles}, current_settings=settings,
+    )
+
+

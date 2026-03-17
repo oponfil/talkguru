@@ -47,8 +47,8 @@ DEFAULT_LANGUAGE_CODE = "en"  # Язык по умолчанию (ISO 639-1)
 # ====== МОДЕЛЬ ИИ ======
 LLM_MODEL = "google/gemini-3.1-flash-lite-preview"  # FREE-модель (по умолчанию)
 # PRO-модель для каждого стиля. Используется при pro_model=True.
-STYLE_PRO_MODELS: dict[str | None, str] = {
-    None: "openai/gpt-5.4",
+STYLE_PRO_MODELS: dict[str, str] = {
+    "userlike": "openai/gpt-5.4",
     "friend": "openai/gpt-5.4",
     "romance": "openai/gpt-5.4",
     "seducer": "google/gemini-3.1-pro-preview",
@@ -111,16 +111,38 @@ AUTO_REPLY_OPTIONS: dict[int | None, str] = {
 }
 
 # ====== СТИЛЬ ОБЩЕНИЯ ======
-# {значение: ключ сообщения} — None = под пользователя (по умолчанию)
-STYLE_OPTIONS: dict[str | None, str] = {
-    None: "settings_style_userlike",
-    "friend": "settings_style_friend",
-    "romance": "settings_style_romance",
-    "business": "settings_style_business",
-    "sales": "settings_style_sales",
-    "paranoid": "settings_style_paranoid",
-    "seducer": "settings_style_seducer",
+
+# Маппинг emoji → стиль (единый источник правды для emoji↔style)
+EMOJI_TO_STYLE: dict[str, str] = {
+    "🦉": "userlike",
+    "🍻": "friend",
+    "💕": "romance",
+    "💼": "business",
+    "💰": "sales",
+    "🕵️": "paranoid",
+    "😈": "seducer",
 }
+
+# Стиль по умолчанию — первый в EMOJI_TO_STYLE
+DEFAULT_STYLE: str = next(iter(EMOJI_TO_STYLE.values()))
+
+# Обратный маппинг стиль → emoji
+STYLE_TO_EMOJI: dict[str, str] = {v: k for k, v in EMOJI_TO_STYLE.items()}
+
+# {значение: ключ сообщения}
+def _style_msg_key(style: str) -> str:
+    return f"settings_style_{style}"
+
+# Отображаемое имя стиля (из ключа)
+def style_display_name(style: str) -> str:
+    return style.title()
+
+STYLE_OPTIONS: dict[str, str] = {
+    style: _style_msg_key(style) for style in EMOJI_TO_STYLE.values()
+}
+
+# Количество чатов в /styles
+CHAT_STYLES_DIALOGS_LIMIT = 10
 
 # ====== ЧАСОВОЙ ПОЯС ======
 # 30 популярных UTC-смещений (часы); дробные: +3.5 Иран, +4.5 Афганистан,
