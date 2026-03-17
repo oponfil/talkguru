@@ -54,9 +54,9 @@ SYSTEM_MESSAGES = {
     # — Connect: Phone flow —
     "connect_phone_prompt": "📱 Send your phone number in international format (e.g. +1234567890).\n\n⚠️ The number will be used once for login and will NOT be stored.",
     "connect_phone_btn_qr": "📷 Connect via QR code",
-    "connect_code_prompt": "📲 Enter the confirmation code you received from Telegram.\n\n⚠️ IMPORTANT: Add any letter or space anywhere in the code.\nExample: 12x345 or 123 45\n\nThis prevents Telegram from blocking the login.",
-    "connect_code_invalid": "❌ Invalid code. Please try again.\nRemember: add any letter or space in the code (e.g. 12x345):",
-    "connect_code_no_separator": "⚠️ It looks like you entered the code without separators. Telegram has blocked this code.\nPlease try /connect again, and this time add any letter or space in the code (e.g. 12x345).",
+    "connect_code_prompt": "📲 Enter the confirmation code you received from Telegram.\n\n⚠️ IMPORTANT: Add any character or space anywhere in the code.\nExample: 12-345 or 1234 5",
+    "connect_code_invalid": "❌ Invalid code. Please try again.\nRemember: add any character or space in the code (e.g. 12-345):",
+    "connect_code_no_separator": "⚠️ It looks like you entered the code without separators. Telegram has blocked this code.\nNext time add any character or space in the code (e.g. 12-345).",
     "connect_code_expired": "⏰ Code expired. Please try /connect again.",
     "connect_phone_invalid": "❌ Invalid phone number. Please send your number in international format (e.g. +1234567890):",
     "connect_phone_timeout": "⏰ Login timed out. Please try /connect again.",

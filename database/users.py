@@ -1,12 +1,21 @@
 # database/users.py — CRUD для таблицы users
 
+import time
 from datetime import datetime, timezone
 from typing import Optional
 
-from config import DEBUG_PRINT
+from config import DEBUG_PRINT, USER_CACHE_TTL
 from database import run_supabase, supabase
 from utils.session_crypto import decrypt_session_string, encrypt_session_string
 from utils.utils import get_timestamp
+
+# In-memory кэш get_user(): {user_id: (expires_at, data)}
+_user_cache: dict[int, tuple[float, dict]] = {}
+
+
+def invalidate_user_cache(user_id: int) -> None:
+    """Удаляет пользователя из in-memory кэша."""
+    _user_cache.pop(user_id, None)
 
 
 class UserStorageError(RuntimeError):
@@ -47,6 +56,7 @@ async def upsert_user(
 
         if DEBUG_PRINT:
             print(f"{get_timestamp()} [DB] Upsert user {user_id} (@{username})")
+        invalidate_user_cache(user_id)
         return True
     except Exception as e:
         print(f"{get_timestamp()} [DB] ERROR upsert_user {user_id}: {e}")
@@ -89,6 +99,7 @@ async def save_session(user_id: int, session_string: str) -> bool:
             ).execute()
         )
 
+        invalidate_user_cache(user_id)
         if DEBUG_PRINT:
             print(f"{get_timestamp()} [DB] Session saved for user {user_id}")
         return True
@@ -150,6 +161,7 @@ async def clear_session(user_id: int) -> bool:
             ).eq("user_id", user_id).execute()
         )
 
+        invalidate_user_cache(user_id)
         if DEBUG_PRINT:
             print(f"{get_timestamp()} [DB] Session cleared for user {user_id}")
         return True
@@ -175,7 +187,14 @@ async def has_saved_session(user_id: int) -> bool:
 
 
 async def get_user(user_id: int) -> Optional[dict]:
-    """Получает все поля пользователя из БД."""
+    """Получает все поля пользователя из БД (с in-memory кэшем)."""
+    cached = _user_cache.get(user_id)
+    if cached is not None:
+        expires_at, data = cached
+        if time.monotonic() < expires_at:
+            return data
+        _user_cache.pop(user_id, None)
+
     try:
         result = await run_supabase(
             lambda: supabase.table("users").select(
@@ -184,7 +203,9 @@ async def get_user(user_id: int) -> Optional[dict]:
         )
 
         if result.data and result.data[0]:
-            return result.data[0]
+            user = result.data[0]
+            _user_cache[user_id] = (time.monotonic() + USER_CACHE_TTL, user)
+            return user
         return None
     except Exception as e:
         print(f"{get_timestamp()} [DB] ERROR get_user {user_id}: {e}")
@@ -269,6 +290,7 @@ async def update_user_settings(user_id: int, settings: dict, *, current_settings
                 ).eq("user_id", user_id).execute()
             )
 
+        invalidate_user_cache(user_id)
         if DEBUG_PRINT:
             log_settings = {**merged}
             cp = log_settings.get("custom_prompt")

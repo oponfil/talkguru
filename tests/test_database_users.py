@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+import database.users as users_module
 from database.users import (
     clear_session,
     ensure_user_exists,
@@ -19,6 +20,14 @@ from database.users import (
     UserStorageError,
 )
 from utils.session_crypto import decrypt_session_string, encrypt_session_string
+
+
+@pytest.fixture(autouse=True)
+def _clear_user_cache():
+    """Очищает кэш get_user() перед каждым тестом."""
+    users_module._user_cache.clear()
+    yield
+    users_module._user_cache.clear()
 
 
 def _make_mock_table():
@@ -393,3 +402,69 @@ class TestUpdateUserSettings:
         )
         mock_table.update.assert_not_called()
 
+
+class TestUserCache:
+    """Тесты для in-memory кэша get_user()."""
+
+    @pytest.mark.asyncio
+    async def test_cache_hit_skips_db(self):
+        """Повторный вызов отдаёт данные из кэша без запроса в БД."""
+        mock_table = _make_mock_table()
+        mock_table.execute.return_value = MagicMock(
+            data=[{"user_id": 42, "settings": {}}]
+        )
+        with patch("database.users.supabase") as mock_sb:
+            mock_sb.table.return_value = mock_table
+            first = await get_user(42)
+            second = await get_user(42)
+
+        assert first == second == {"user_id": 42, "settings": {}}
+        # select вызван один раз — второй раз из кэша
+        assert mock_table.select.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_cache_expires_after_ttl(self):
+        """После TTL данные перечитываются из БД."""
+        mock_table = _make_mock_table()
+        mock_table.execute.return_value = MagicMock(
+            data=[{"user_id": 42, "settings": {}}]
+        )
+        with patch("database.users.supabase") as mock_sb, \
+             patch("database.users.time") as mock_time:
+            mock_sb.table.return_value = mock_table
+            mock_time.monotonic.side_effect = [0, 3600, 3601, 3601, 7201]
+            #                                  ^put  ^check(ok) ^check(expired) ^put ^put(new)
+            await get_user(42)  # cache miss → DB query, monotonic returns 0 (put)
+            await get_user(42)  # monotonic returns 3600 → < 0+3600=3600? No, == 3600, not <
+            # 3600 is NOT < 3600, so cache expired → DB query again
+
+        assert mock_table.select.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_invalidate_on_update_settings(self):
+        """update_user_settings() сбрасывает кэш."""
+        mock_table = _make_mock_table()
+        user_data = {"user_id": 42, "settings": {"style": "friend"}}
+        mock_table.execute.return_value = MagicMock(data=[user_data])
+        with patch("database.users.supabase") as mock_sb:
+            mock_sb.table.return_value = mock_table
+            await get_user(42)  # populate cache
+            assert 42 in users_module._user_cache
+
+            await update_user_settings(42, {"style": "romance"})
+            assert 42 not in users_module._user_cache
+
+    @pytest.mark.asyncio
+    async def test_invalidate_on_upsert(self):
+        """upsert_user() сбрасывает кэш."""
+        mock_table = _make_mock_table()
+        mock_table.execute.return_value = MagicMock(
+            data=[{"user_id": 42, "settings": {}}]
+        )
+        with patch("database.users.supabase") as mock_sb:
+            mock_sb.table.return_value = mock_table
+            await get_user(42)  # populate cache
+            assert 42 in users_module._user_cache
+
+            await upsert_user(42, username="new_name")
+            assert 42 not in users_module._user_cache

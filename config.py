@@ -27,6 +27,7 @@ SUPABASE_URL = os.getenv("SUPABASE_URL", "")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY", "")
 if not SUPABASE_URL or not SUPABASE_KEY:
     print("⚠️  WARNING: SUPABASE_URL или SUPABASE_KEY не заданы!")
+USER_CACHE_TTL = 3600  # In-memory кэш get_user(), секунды
 
 # ====== ШИФРОВАНИЕ СЕССИЙ ======
 SESSION_ENCRYPTION_KEY = os.getenv("SESSION_ENCRYPTION_KEY", "")
