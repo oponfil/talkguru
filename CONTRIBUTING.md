@@ -1,100 +1,100 @@
 # Coding Style Guide & Conventions
 
-Этот документ — **Style Guide** для проекта **DraftGuru**.
-Описывает стандарты кодирования, обязательные для соблюдения.
+This document is the **Style Guide** for the **DraftGuru** project.
+It describes the coding standards that must be strictly followed.
 
-## 1. Импорты (Imports)
+## 1. Imports
 
-### Основное правило
-Все `import` и `from ... import ...` должны быть **в начале файла**.
+### Core Rule
+All `import` and `from ... import ...` statements must be **at the top of the file**.
 
-### Запрет Lazy Imports
-❌ Запрещено импортировать внутри функций.
-✅ Исключение: разрыв циклических зависимостей (с комментарием `# circular dependency`).
+### No Lazy Imports
+❌ Lazy imports (importing inside functions) are strictly prohibited.
+✅ Exception: Breaking circular dependencies (requires `# circular dependency` comment).
 
-### Порядок (PEP 8)
+### Order (PEP 8)
 1. **Standard Library** (`os`, `sys`, `asyncio`, `typing`)
 2. **Third Party** (`telegram`, `httpx`, `supabase`)
 3. **Local Application** (`config`, `database`, `clients`)
 
-## 2. Именование (Naming Conventions)
+## 2. Naming Conventions
 
-- **Классы**: `PascalCase` (`UserContext`)
-- **Функции и переменные**: `snake_case` (`generate_response`)
-- **Константы**: `UPPER_CASE` (`MAX_RETRIES`)
-- **Приватные методы**: `_snake_case` (с префиксом `_`)
+- **Classes**: `PascalCase` (`UserContext`)
+- **Functions and Variables**: `snake_case` (`generate_response`)
+- **Constants**: `UPPER_CASE` (`MAX_RETRIES`)
+- **Private Methods**: `_snake_case` (with `_` prefix)
 
-## 3. Форматирование и Стиль
+## 3. Formatting and Style
 
-- **Line Length**: 120 символов
-- **Quotes**: Двойные кавычки `"` (стандарт Black)
-- **Type Hinting**: Обязательно для всех функций (`def func(a: int) -> bool:`)
-- **Docstrings**: На **русском языке**, обязательны для публичных функций
-- **File Header**: Каждый Python-файл должен начинаться с комментария в формате `# path/to/file.py — Краткое описание`
+- **Line Length**: 120 characters
+- **Quotes**: Double quotes `"` (Black standard)
+- **Type Hinting**: Mandatory for all functions (`def func(a: int) -> bool:`)
+- **Docstrings**: In **Russian**, mandatory for public functions
+- **File Header**: Every Python file must start with a comment in the format `# path/to/file.py — Short description`
 
-## 4. Асинхронность (Async/Await)
+## 4. Asynchronous Code (Async/Await)
 
-Все сетевые вызовы — `async`:
+All network calls must be `async`:
 - Telegram API
 - Supabase
 - x402gate / OpenRouter
 
-Для CPU-bound:
+For CPU-bound tasks:
 ```python
 result = await asyncio.to_thread(blocking_function, arg1)
 ```
 
-## 5. Логирование
+## 5. Logging
 
-- Формат: `print(f"{get_timestamp()} [COMPONENT] Message")`
-- ❌ Ошибки **не оборачивать** в `if DEBUG_PRINT:` — должны быть видны всегда
-- ✅ Информационный вывод — `if DEBUG_PRINT:`
-- Уровни: `[DEBUG]`, `[INFO]`, `[WARNING]`, `[ERROR]`
+- Format: `print(f"{get_timestamp()} [COMPONENT] Message")`
+- ❌ **Do not** wrap errors in `if DEBUG_PRINT:` — they must always be visible
+- ✅ Informational output — `if DEBUG_PRINT:`
+- Levels: `[DEBUG]`, `[INFO]`, `[WARNING]`, `[ERROR]`
 
 ## 6. DRY (Don't Repeat Yourself)
 
-❌ Не дублировать логику.
-✅ Выносить общий код в отдельные функции.
+❌ Do not duplicate logic.
+✅ Extract common code into separate functions.
 
-## 7. Доступ к Базе Данных
+## 7. Database Access
 
-❌ Запрещено вызывать базу данных напрямую вне папки `database/`.
-❌ Нельзя импортировать `supabase` или `run_supabase` в `handlers/`, `utils/`, `clients/` и другие слои приложения.
-✅ Любой доступ к данным должен идти только через функции в `database/*.py`.
-✅ Если нужен новый запрос, сначала добавляем отдельную функцию в `database/`, а затем вызываем её из остальных модулей.
+❌ Direct database calls outside the `database/` folder are prohibited.
+❌ Do not import `supabase` or `run_supabase` in `handlers/`, `utils/`, `clients/`, or other application layers.
+✅ Any data access must go exclusively through functions in `database/*.py`.
+✅ If a new query is needed, first add a separate function in `database/`, and then call it from other modules.
 
-## 8. Обратная Совместимость
+## 8. Backward Compatibility
 
-❌ Не поддерживаем. Старый код удаляем сразу.
-✅ Один формат, без fallback.
+❌ Not supported. Remove old code immediately.
+✅ One format, no fallbacks.
 
 ## 9. Linting (Ruff)
 
-Используем **ruff** для проверки кода. Перед каждым коммитом:
+We use **ruff** for code linting. Before every commit:
 
 ```bash
 ruff check .
 ```
 
-- Все ошибки должны быть исправлены до коммита
-- `# noqa: <RULE>` допустим только с обоснованием (например, `# noqa: E402` для намеренного порядка импортов)
+- All errors must be fixed before committing
+- `# noqa: <RULE>` is permissible only with a justification (e.g., `# noqa: E402` for intentional import ordering)
 
 ## 10. Git Commits
 
-### Формат: Conventional Commits
+### Format: Conventional Commits
 ```
 <type>(<scope>): <subject>
 
 <body>
 ```
 
-**Типы:** `feat`, `fix`, `docs`, `refactor`, `test`, `chore`
+**Types:** `feat`, `fix`, `docs`, `refactor`, `test`, `chore`
 
-### Правило полноты
-❌ Запрещено делать коммит, где `<body>` не описывает **все** изменения.
-✅ Каждый изменённый файл / фича должен быть отражён в `<body>` списком `- ...`.
+### Completeness Rule
+❌ It is prohibited to make a commit where the `<body>` does not describe **all** changes.
+✅ Every modified file / feature must be reflected in the `<body>` as a list `- ...`.
 
-### Пример
+### Example
 ```
 feat(bot): add /start command with greeting message
 
@@ -105,49 +105,49 @@ feat(bot): add /start command with greeting message
 
 ### PowerShell Workflow
 ```powershell
-# Записать сообщение коммита в файл
+# Write commit message to a file
 [System.IO.File]::WriteAllText(".git-commit-msg.txt", "feat(scope): description")
 
-# Закоммитить
+# Commit
 git add -A
 git commit -F .git-commit-msg.txt
 ```
 
-## 11. Тестирование — TDD (Test-Driven Development)
+## 11. Testing — TDD (Test-Driven Development)
 
-Проект следует подходу **TDD** — разработка через тестирование.
+The project follows the **TDD** approach — Test-Driven Development.
 
-### Принцип
+### Principle
 
-1. 🔴 **Red** — Напиши тест на новую функциональность. Тест должен упасть.
-2. 🟢 **Green** — Напиши минимальный код, чтобы тест прошёл.
-3. 🔵 **Refactor** — Отрефактори код, не ломая тесты.
+1. 🔴 **Red** — Write a test for new functionality. The test must fail.
+2. 🟢 **Green** — Write the minimal code to make the test pass.
+3. 🔵 **Refactor** — Refactor the code without breaking the tests.
 
-### Правила
+### Rules
 
-- ❌ **Запрещено** мержить код без тестов
-- ✅ Каждая новая функция / обработчик / утилита **обязана** иметь тесты
-- ✅ Тесты покрывают **все модули** — без исключений
-- ✅ Внешние зависимости **мокаются** — `.env` не нужен
-- ✅ GitHub Actions автоматически запускает тесты при push и PR
+- ❌ Merging code without tests is **prohibited**
+- ✅ Every new function / handler / utility **must** have tests
+- ✅ Tests must cover **all modules** — with no exceptions
+- ✅ External dependencies are **mocked** — `.env` is not required
+- ✅ GitHub Actions automatically run tests on push and PR
 
-### Запуск
+### Execution
 
 ```bash
 pytest tests/ -v
 ```
 
-Все тесты **должны** проходить перед каждым коммитом.
+All tests **must** pass before every commit.
 
 ## 12. Code Review Checklist
 
-1. [ ] **DRY**: Нет дублирования
-2. [ ] **Imports**: В начале файла, без lazy imports
-3. [ ] **Style**: Именование и типизация
-4. [ ] **Async**: Сетевые вызовы через `await`
-5. [ ] **Logging**: Ошибки без `if DEBUG_PRINT`
-6. [ ] **DB Access**: Нет прямых вызовов базы вне `database/`
-7. [ ] **Constants**: Всё в `config.py`
-8. [ ] **Linting**: `ruff check .` проходит без ошибок
-9. [ ] **Tests**: `pytest tests/ -v` проходит без ошибок
-10. [ ] **Commits**: Conventional Commits, английский
+1. [ ] **DRY**: No duplication
+2. [ ] **Imports**: At the top of the file, no lazy imports
+3. [ ] **Style**: Naming and typing
+4. [ ] **Async**: Network calls via `await`
+5. [ ] **Logging**: Errors without `if DEBUG_PRINT`
+6. [ ] **DB Access**: No direct database calls outside `database/`
+7. [ ] **Constants**: Everything in `config.py`
+8. [ ] **Linting**: `ruff check .` passes without errors
+9. [ ] **Tests**: `pytest tests/ -v` passes without errors
+10. [ ] **Commits**: Conventional Commits, in English

@@ -18,8 +18,6 @@ from system_messages import get_system_message, SYSTEM_MESSAGES
 from clients import pyrogram_client
 
 
-
-
 @typing_action
 async def on_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Обработчик команды /start."""
@@ -107,7 +105,10 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
         # Генерируем ответ через OpenRouter с историей и стилем
         kwargs: dict = {"chat_history": history[-MAX_CONTEXT_MESSAGES:]}
-        kwargs["system_prompt"] = build_bot_chat_prompt(style=style)
+        full_name = u.first_name or ""
+        if u.last_name:
+            full_name += f" {u.last_name}"
+        kwargs["system_prompt"] = build_bot_chat_prompt(style=style, user_name=full_name)
         kwargs["reasoning_effort"] = MODEL_REASONING_EFFORT.get(effective_model, "medium")
         if model:
             kwargs["model"] = model

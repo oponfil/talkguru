@@ -129,18 +129,20 @@ HUMAN_STYLE_RULES = (
     "- Write as the user speaking for themselves."
 )
 
-def build_bot_chat_prompt(*, style: str | None = None) -> str:
+def build_bot_chat_prompt(*, style: str | None = None, user_name: str = "") -> str:
     """Собирает системный промпт для чата бота с пользователем.
 
     Комбинирует базовый BOT_PROMPT с блоком стиля общения.
 
     Args:
         style: Стиль общения (None = без дополнительного стиля)
+        user_name: Имя пользователя (first_name из Telegram)
     """
     style_block = STYLE_PROMPTS.get(style, STYLE_PROMPTS[DEFAULT_STYLE])
     style_rules = f"\n\nCOMMUNICATION STYLE:\n{style_block}" if style_block else ""
+    user_block = f"\n\nYou are chatting with: {user_name}" if user_name else ""
 
-    return f"{BOT_PROMPT}{style_rules}\n\n{HUMAN_STYLE_RULES}"
+    return f"{BOT_PROMPT}{style_rules}{user_block}\n\n{HUMAN_STYLE_RULES}"
 
 
 def build_reply_prompt(*, custom_prompt: str = "", style: str | None = None) -> str:

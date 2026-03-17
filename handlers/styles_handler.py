@@ -16,8 +16,9 @@ from config import (
 )
 from database.users import get_user, update_chat_auto_reply, update_chat_style, update_last_msg_at
 from handlers.pyrogram_handlers import get_replied_chats
-from system_messages import get_system_message
+from system_messages import SYSTEM_MESSAGES, get_system_message
 from utils.utils import get_effective_auto_reply, get_effective_style, get_timestamp, normalize_auto_reply, typing_action
+
 
 
 def _style_emoji(style: str | None) -> str:
@@ -25,15 +26,17 @@ def _style_emoji(style: str | None) -> str:
     return STYLE_TO_EMOJI.get(style, "🦉")
 
 
+# Лейблы авто-ответа для /chats — единый источник: SYSTEM_MESSAGES + AUTO_REPLY_OPTIONS.
+# Убираем " Auto-reply" для компактности кнопок.
+_CHAT_AR_LABELS: dict[int | None, str] = {
+    seconds: SYSTEM_MESSAGES[msg_key].replace(" Auto-reply", "")
+    for seconds, msg_key in AUTO_REPLY_OPTIONS.items()
+}
+
+
 def _auto_reply_label(seconds: int | None) -> str:
-    """Формирует короткую метку таймера автоответа."""
-    if seconds is None:
-        return ""
-    if seconds < 60:
-        return f"⏰{seconds}s"
-    if seconds < 3600:
-        return f"⏰{seconds // 60}m"
-    return f"⏰{seconds // 3600}h"
+    """Формирует метку таймера автоответа (из SYSTEM_MESSAGES, без 'Auto-reply')."""
+    return _CHAT_AR_LABELS.get(seconds, "⏰")
 
 
 def _chat_display_name(dialog_info: dict) -> str:

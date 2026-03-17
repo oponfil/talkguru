@@ -155,15 +155,15 @@ class TestStylesHelpers:
         assert _style_emoji("unknown_style") == "🦉"
 
     def test_auto_reply_label_off(self):
-        assert _auto_reply_label(None) == ""
+        assert _auto_reply_label(None) == "⏰: ✅ OFF"
 
     def test_auto_reply_label_minutes(self):
-        assert _auto_reply_label(60) == "⏰1m"
-        assert _auto_reply_label(300) == "⏰5m"
+        assert _auto_reply_label(60) == "⏰: ⚠️ 1 min"
+        assert _auto_reply_label(300) == "⏰: ⚠️ 5 min"
 
     def test_auto_reply_label_hours(self):
-        assert _auto_reply_label(3600) == "⏰1h"
-        assert _auto_reply_label(57600) == "⏰16h"
+        assert _auto_reply_label(3600) == "⏰: ⚠️ 1 hour"
+        assert _auto_reply_label(57600) == "⏰: ⚠️ 16 hours"
 
     def test_chat_display_name_full(self):
         assert _chat_display_name({"first_name": "Алиса", "last_name": "Б.", "title": ""}) == "Алиса Б."
@@ -207,7 +207,7 @@ class TestStylesHelpers:
         user_settings = {"auto_reply": None, "chat_auto_replies": {"100": 60}}
         keyboard = _build_styles_keyboard(dialogs, {}, user_settings)
         buttons = keyboard.inline_keyboard
-        assert "⏰1m" in buttons[0][1].text
+        assert "⏰: ⚠️ 1 min" in buttons[0][1].text
 
 
 # ====== /chats command handler ======
@@ -336,7 +336,7 @@ class TestOnStyles:
 
         mock_query.edit_message_text.assert_called_once()
         kb = mock_query.edit_message_text.call_args.kwargs["reply_markup"]
-        assert "⏰1m" in kb.inline_keyboard[0][1].text
+        assert "⏰: ⚠️ 1 min" in kb.inline_keyboard[0][1].text
 
     @pytest.mark.asyncio
     async def test_auto_reply_callback_resets(self, mock_update, mock_context):
