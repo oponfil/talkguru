@@ -8,7 +8,8 @@ from typing import Dict
 
 from clients.x402gate.openrouter import generate_response
 from config import (
-    CUSTOM_PROMPT_MAX_LENGTH,
+    CHAT_PROMPT_MAX_LENGTH,
+    USER_PROMPT_MAX_LENGTH,
     DEFAULT_LANGUAGE_CODE,
     DEBUG_PRINT,
     EMOJI_TO_STYLE,
@@ -89,16 +90,20 @@ SYSTEM_MESSAGES = {
     "settings_model_pro": "🤖 Model: ⭐ PRO",
     "settings_prompt_set": "📝 Prompt: ✅ ON",
     "settings_prompt_empty": "📝 Prompt: ❌ OFF",
-    "settings_prompt_enter": f"📝 Send your custom prompt as a message. It will be added to the AI system prompt for all chats.\n\n⚠️ Max length: {CUSTOM_PROMPT_MAX_LENGTH} characters.",
-    "settings_prompt_truncated": f"⚠️ Prompt was too long, so I saved only the first {CUSTOM_PROMPT_MAX_LENGTH} characters.",
-    "settings_prompt_saved": "✅ Custom prompt saved!",
-    "settings_auto_reply_off": "⏰ Auto-reply: ✅ OFF",
-    "settings_auto_reply_1m": "⏰ Auto-reply: ⚠️ 1 min",
-    "settings_auto_reply_5m": "⏰ Auto-reply: ⚠️ 5 min",
-    "settings_auto_reply_15m": "⏰ Auto-reply: ⚠️ 15 min",
-    "settings_auto_reply_1h": "⏰ Auto-reply: ⚠️ 1 hour",
-    "settings_auto_reply_16h": "⏰ Auto-reply: ⚠️ 16 hours",
-    "settings_auto_reply_ignore": "🔇 Ignore",
+    "settings_prompt_saved": "✅ Prompt saved!",
+    "settings_prompt_truncated": "⚠️ Prompt was too long, so I saved only the first {max_length} characters.",
+    "settings_prompt_cleared": "🧹 Prompt cleared.",
+    "settings_prompt_current": f"📝 Global prompt (all chats):\n«{{prompt}}»\n\nSend a new prompt to replace it (Max length: {USER_PROMPT_MAX_LENGTH} chars):",
+    "settings_prompt_no_prompt": f"📝 Global prompt (all chats): not set.\n\nSend a prompt to set it (Max length: {USER_PROMPT_MAX_LENGTH} chars):",
+    # — Auto-reply labels (base, without prefix) —
+    "auto_reply_prefix": "Auto-reply",
+    "auto_reply_off": "✅ OFF",
+    "auto_reply_1m": "⚠️ 1 min",
+    "auto_reply_5m": "⚠️ 5 min",
+    "auto_reply_15m": "⚠️ 15 min",
+    "auto_reply_1h": "⚠️ 1 hour",
+    "auto_reply_16h": "⚠️ 16 hours",
+    "auto_reply_ignore": "🔇 Ignore",
     "settings_timezone_back": "🕐 Time",
 
     # — Settings: Style — (генерируется из EMOJI_TO_STYLE)
@@ -109,9 +114,20 @@ SYSTEM_MESSAGES = {
 
     # — Chats (per-chat settings) —
     "menu_chats": "Chat settings",
-    "chats_title": "🎭 Chats\nTap to change style or auto-reply timer.",
+    "chats_title": "🎭 Chats\nTap to change prompt, style, or auto-reply timer.",
     "chats_not_connected": "🔌 Connect your account first with /connect.",
     "chats_no_chats": "No active chats found. Start a conversation first.",
+    "chats_prompt_set": "📝: ✅ ON",
+    "chats_prompt_empty": "📝: ❌ OFF",
+
+
+    # — Chats: per-chat prompt —
+    "chats_prompt_current": f"📝 Prompt for {{chat_name}}:\n«{{prompt}}»\n\nSend a new prompt to replace it (Max length: {CHAT_PROMPT_MAX_LENGTH} chars):",
+    "chats_prompt_no_prompt": f"📝 Prompt for {{chat_name}}: not set.\n\nSend a prompt to set it (Max length: {CHAT_PROMPT_MAX_LENGTH} chars):",
+
+    # — Prompt editor buttons —
+    "prompt_cancel": "❌ Cancel",
+    "prompt_clear": "🗑 Clear",
 }
 
 

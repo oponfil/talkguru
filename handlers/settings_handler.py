@@ -12,6 +12,7 @@ from database.users import update_last_msg_at, update_user_settings
 from system_messages import get_system_message, get_system_messages
 from utils.telegram_user import ensure_effective_user
 from utils.utils import (
+    clear_pending_input,
     get_effective_drafts,
     get_effective_pro_model,
     get_timestamp,
@@ -52,7 +53,13 @@ def _build_settings_keyboard(settings: dict, messages: dict) -> InlineKeyboardMa
     model_label = messages.get("settings_model_pro") if pro_model else messages.get("settings_model_free")
     prompt_label = messages.get("settings_prompt_set") if has_prompt else messages.get("settings_prompt_empty")
     auto_reply = normalize_auto_reply(settings.get("auto_reply"))
-    auto_label = messages.get(AUTO_REPLY_OPTIONS.get(auto_reply, "settings_auto_reply_off"))
+    ar_key = AUTO_REPLY_OPTIONS.get(auto_reply, "auto_reply_off")
+    ar_base = messages.get(ar_key, "")
+    if ar_key == "auto_reply_ignore":
+        auto_label = ar_base
+    else:
+        ar_prefix = messages.get("auto_reply_prefix", "Auto-reply")
+        auto_label = f"⏰ {ar_prefix}: {ar_base}"
     style_label = messages.get(STYLE_OPTIONS.get(settings.get("style"), "settings_style_userlike"))
 
     tz_offset = settings.get("tz_offset", 0) or 0
@@ -72,33 +79,6 @@ def _build_settings_keyboard(settings: dict, messages: dict) -> InlineKeyboardMa
     return InlineKeyboardMarkup(keyboard)
 
 
-def _escape_markdown_v2(text: str) -> str:
-    """Экранирует спецсимволы для Telegram MarkdownV2."""
-    special_chars = r"_*[]()~`>#+-=|{}.!"
-    return "".join(f"\\{c}" if c in special_chars else c for c in text)
-
-
-def _build_settings_text(title: str, settings: dict) -> tuple[str, str | None]:
-    """Формирует текст сообщения настроек с превью промпта.
-
-    Returns:
-        (text, parse_mode) — parse_mode задаётся только при strikethrough.
-    """
-    custom_prompt = settings.get("custom_prompt", "")
-    cleared_prompt = settings.get("_cleared_prompt", "")
-
-    if cleared_prompt:
-        escaped_title = _escape_markdown_v2(title)
-        escaped_prompt = _escape_markdown_v2(cleared_prompt)
-        text = f"{escaped_title}\n\n📝 ~«{escaped_prompt}»~"
-        return text, "MarkdownV2"
-
-    if not custom_prompt:
-        return title, None
-
-    return f"{title}\n\n📝 «{custom_prompt}»", None
-
-
 async def _send_settings_error(query, language_code: str | None) -> None:
     """Отправляет сообщение об ошибке сохранения настроек."""
     error_msg = await get_system_message(language_code, "error")
@@ -110,6 +90,7 @@ async def _send_settings_error(query, language_code: str | None) -> None:
 async def on_settings(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Обработчик команды /settings — показывает настройки с Inline-кнопками."""
     u = update.effective_user
+    await clear_pending_input(context, u.id, context.bot)
 
     try:
         user = await ensure_effective_user(update)
@@ -125,9 +106,12 @@ async def on_settings(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
     messages = await get_system_messages(u.language_code)
 
-    text, parse_mode = _build_settings_text(title, settings)
+    # Добавляем превью промпта к заголовку
+    custom_prompt = settings.get("custom_prompt", "")
+    text = f"{title}\n\n📝 «{custom_prompt}»" if custom_prompt else title
+
     keyboard = _build_settings_keyboard(settings, messages)
-    await update.message.reply_text(text, reply_markup=keyboard, parse_mode=parse_mode)
+    await update.message.reply_text(text, reply_markup=keyboard)
 
     if DEBUG_PRINT:
         print(f"{get_timestamp()} [BOT] /settings from user {u.id}")
@@ -149,6 +133,8 @@ async def on_settings_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         return
 
     settings = user.get("settings") or {}
+    if not action.startswith("settings:prompt"):
+        await clear_pending_input(context, u.id, context.bot)
 
     if action == "settings:drafts":
         current = get_effective_drafts(settings)
@@ -171,26 +157,38 @@ async def on_settings_callback(update: Update, context: ContextTypes.DEFAULT_TYP
             await _send_settings_error(query, u.language_code)
             return
     elif action == "settings:prompt":
-        # Если промпт уже установлен — очищаем, иначе запрашиваем ввод
-        if settings.get("custom_prompt"):
-            old_prompt = settings["custom_prompt"]
-            updated_settings = await update_user_settings(
-                u.id,
-                {"custom_prompt": ""},
-                current_settings=settings,
-            )
-            if updated_settings is None:
-                await _send_settings_error(query, u.language_code)
-                return
-            # Передаём удалённый промпт для отображения в сообщении
-            updated_settings["_cleared_prompt"] = old_prompt
+        # Показываем текущий промпт + кнопки Cancel / Clear
+        custom_prompt = settings.get("custom_prompt", "")
+        messages = await get_system_messages(u.language_code)
+        if custom_prompt:
+            msg = messages.get("settings_prompt_current", "").format(prompt=custom_prompt)
         else:
-            # Ставим флаг ожидания промпта
-            context.user_data["awaiting_prompt"] = True
-            msg = await get_system_message(u.language_code, "settings_prompt_enter")
-            await query.edit_message_text(text=msg)
-            if DEBUG_PRINT:
-                print(f"{get_timestamp()} [BOT] Awaiting custom prompt from user {u.id}")
+            msg = messages.get("settings_prompt_no_prompt", "")
+
+        buttons = [[InlineKeyboardButton(messages.get("prompt_cancel", "❌ Cancel"), callback_data="settings:prompt_cancel")]]
+        if custom_prompt:
+            buttons[0].append(InlineKeyboardButton(messages.get("prompt_clear", "🗑 Clear"), callback_data="settings:prompt_clear"))
+
+        await clear_pending_input(context, u.id, context.bot)
+        context.user_data["awaiting_prompt"] = True
+        await query.edit_message_text(text=msg, reply_markup=InlineKeyboardMarkup(buttons))
+        if DEBUG_PRINT:
+            print(f"{get_timestamp()} [BOT] Prompt editor opened for user {u.id}")
+        return
+    elif action == "settings:prompt_cancel":
+        # Отмена — убираем awaiting и восстанавливаем меню настроек
+        await clear_pending_input(context, u.id, context.bot)
+        updated_settings = settings
+    elif action == "settings:prompt_clear":
+        # Очистка промпта
+        await clear_pending_input(context, u.id, context.bot)
+        updated_settings = await update_user_settings(
+            u.id,
+            {"custom_prompt": ""},
+            current_settings=settings,
+        )
+        if updated_settings is None:
+            await _send_settings_error(query, u.language_code)
             return
     elif action == "settings:auto_reply":
         current = normalize_auto_reply(settings.get("auto_reply"))
@@ -241,10 +239,11 @@ async def on_settings_callback(update: Update, context: ContextTypes.DEFAULT_TYP
 
     keyboard = _build_settings_keyboard(updated_settings, messages)
     title = messages.get("settings_title", "⚙️ Settings")
-    text, parse_mode = _build_settings_text(title, updated_settings)
 
-    await query.edit_message_text(text=text, reply_markup=keyboard, parse_mode=parse_mode)
+    custom_prompt = updated_settings.get("custom_prompt", "")
+    text = f"{title}\n\n📝 «{custom_prompt}»" if custom_prompt else title
+
+    await query.edit_message_text(text=text, reply_markup=keyboard)
 
     if DEBUG_PRINT:
         print(f"{get_timestamp()} [BOT] Settings updated by user {u.id}: {action}")
-

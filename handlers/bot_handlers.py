@@ -6,13 +6,13 @@ import traceback
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Message, Update, User
 from telegram.ext import ContextTypes
 
-from config import CUSTOM_PROMPT_MAX_LENGTH, DEBUG_PRINT, LLM_MODEL, MODEL_REASONING_EFFORT, MAX_CONTEXT_MESSAGES
+from config import CHAT_PROMPT_MAX_LENGTH, USER_PROMPT_MAX_LENGTH, DEBUG_PRINT, LLM_MODEL, MODEL_REASONING_EFFORT, MAX_CONTEXT_MESSAGES
 from utils.utils import get_effective_model, get_timestamp, serialize_user_updates, typing_action
 from utils.bot_utils import update_user_menu
 from utils.telegram_user import ensure_effective_user, upsert_effective_user
 from clients.x402gate.openrouter import generate_response
 from prompts import build_bot_chat_prompt
-from database.users import update_last_msg_at, update_tg_rating, update_user_settings
+from database.users import update_chat_prompt, update_last_msg_at, update_tg_rating, update_user_settings
 from utils.telegram_rating import extract_rating_from_chat
 from system_messages import get_system_message, SYSTEM_MESSAGES
 from clients import pyrogram_client
@@ -85,7 +85,11 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     m = update.message
 
     message_text = m.text or ""
-    if not message_text.strip():
+    awaiting_prompt_input = (
+        context.user_data.get("awaiting_prompt")
+        or context.user_data.get("awaiting_chat_prompt") is not None
+    )
+    if not message_text.strip() and not awaiting_prompt_input:
         return
 
     await _process_text(update, context, u, m, message_text)
@@ -96,12 +100,45 @@ async def _process_text(
     u: User, m: Message, message_text: str,
 ) -> None:
     """Внутренняя логика on_text, выполняется под per-user lock."""
+    # Проверяем: пользователь вводит per-chat промпт?
+    chat_prompt_chat_id = context.user_data.get("awaiting_chat_prompt")
+    if chat_prompt_chat_id is not None:
+        prompt_text = message_text.strip()
+        is_clearing_prompt = prompt_text == ""
+        was_truncated = len(prompt_text) > CHAT_PROMPT_MAX_LENGTH
+        if was_truncated:
+            prompt_text = prompt_text[:CHAT_PROMPT_MAX_LENGTH]
+
+        saved = await update_chat_prompt(
+            u.id,
+            chat_prompt_chat_id,
+            None if is_clearing_prompt else prompt_text,
+        )
+        if not saved:
+            error_msg = await get_system_message(u.language_code, "error")
+            await m.reply_text(error_msg)
+            return
+
+        context.user_data.pop("awaiting_chat_prompt", None)
+        context.user_data.pop("awaiting_prompt", None)
+        if is_clearing_prompt:
+            message_key = "settings_prompt_cleared"
+        else:
+            message_key = "settings_prompt_truncated" if was_truncated else "settings_prompt_saved"
+        msg = await get_system_message(u.language_code, message_key)
+        if was_truncated:
+            msg = msg.format(max_length=CHAT_PROMPT_MAX_LENGTH)
+        await m.reply_text(msg)
+        if DEBUG_PRINT:
+            print(f"{get_timestamp()} [BOT] Chat prompt saved for user {u.id}, chat {chat_prompt_chat_id}: {len(prompt_text)} chars")
+        return
+
     # Проверяем: пользователь вводит кастомный промпт?
     if context.user_data.get("awaiting_prompt"):
         prompt_text = message_text.strip()
-        was_truncated = len(prompt_text) > CUSTOM_PROMPT_MAX_LENGTH
+        was_truncated = len(prompt_text) > USER_PROMPT_MAX_LENGTH
         if was_truncated:
-            prompt_text = prompt_text[:CUSTOM_PROMPT_MAX_LENGTH]
+            prompt_text = prompt_text[:USER_PROMPT_MAX_LENGTH]
 
         saved = await update_user_settings(u.id, {"custom_prompt": prompt_text})
         if not saved:
@@ -110,8 +147,11 @@ async def _process_text(
             return
 
         context.user_data.pop("awaiting_prompt", None)
+        context.user_data.pop("awaiting_chat_prompt", None)
         message_key = "settings_prompt_truncated" if was_truncated else "settings_prompt_saved"
         msg = await get_system_message(u.language_code, message_key)
+        if was_truncated:
+            msg = msg.format(max_length=USER_PROMPT_MAX_LENGTH)
         await m.reply_text(msg)
         if DEBUG_PRINT:
             print(f"{get_timestamp()} [BOT] Custom prompt saved for user {u.id}: {len(prompt_text)} chars")

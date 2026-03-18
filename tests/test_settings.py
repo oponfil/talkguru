@@ -5,33 +5,11 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from config import STYLE_OPTIONS
-from handlers.settings_handler import _build_settings_text, _format_tz_offset, on_settings, on_settings_callback
+from handlers.settings_handler import _format_tz_offset, on_settings, on_settings_callback
 from system_messages import SYSTEM_MESSAGES
 
 MESSAGES = SYSTEM_MESSAGES
 TITLE = MESSAGES["settings_title"]
-
-
-class TestBuildSettingsText:
-    """Тесты для _build_settings_text()."""
-
-    def test_no_prompt_returns_title(self):
-        """Без промпта → только заголовок, без parse_mode."""
-        assert _build_settings_text(TITLE, {}) == (TITLE, None)
-        assert _build_settings_text(TITLE, {"custom_prompt": ""}) == (TITLE, None)
-
-    def test_short_prompt_shown_fully(self):
-        """Короткий промпт → показывается полностью, без parse_mode."""
-        text, parse_mode = _build_settings_text(TITLE, {"custom_prompt": "Be friendly"})
-        assert "«Be friendly»" in text
-        assert parse_mode is None
-
-    def test_long_prompt_shown_fully(self):
-        """Длинный промпт → показывается полностью, без parse_mode."""
-        long_prompt = "A" * 900
-        text, parse_mode = _build_settings_text(TITLE, {"custom_prompt": long_prompt})
-        assert f"«{long_prompt}»" in text
-        assert parse_mode is None
 
 
 class TestOnSettings:
@@ -52,7 +30,7 @@ class TestOnSettings:
         assert buttons[1][0].text == MESSAGES["settings_style_userlike"]
         assert buttons[2][0].text == MESSAGES["settings_drafts_on"]
         assert buttons[3][0].text == MESSAGES["settings_prompt_empty"]
-        assert buttons[4][0].text == MESSAGES["settings_auto_reply_off"]
+        assert buttons[4][0].text == f"⏰ {MESSAGES['auto_reply_prefix']}: {MESSAGES['auto_reply_off']}"
 
     @pytest.mark.asyncio
     async def test_shows_custom_settings(self, mock_update, mock_context):
@@ -78,7 +56,7 @@ class TestOnSettings:
             await on_settings(mock_update, mock_context)
 
         keyboard = mock_update.message.reply_text.call_args.kwargs["reply_markup"]
-        assert keyboard.inline_keyboard[4][0].text == MESSAGES["settings_auto_reply_off"]
+        assert keyboard.inline_keyboard[4][0].text == f"⏰ {MESSAGES['auto_reply_prefix']}: {MESSAGES['auto_reply_off']}"
 
     @pytest.mark.asyncio
     async def test_shows_prompt_preview(self, mock_update, mock_context):
@@ -91,6 +69,20 @@ class TestOnSettings:
 
         sent_text = mock_update.message.reply_text.call_args.args[0]
         assert "«Be concise and friendly»" in sent_text
+
+    @pytest.mark.asyncio
+    async def test_opening_settings_clears_prompt_waiting_state(self, mock_update, mock_context):
+        """Открытие /settings сбрасывает состояние редактора prompt."""
+        mock_context.user_data["awaiting_prompt"] = True
+        mock_context.user_data["awaiting_chat_prompt"] = 100
+
+        with patch("handlers.settings_handler.ensure_effective_user", new_callable=AsyncMock, return_value={"settings": {}}), \
+             patch("handlers.settings_handler.get_system_message", new_callable=AsyncMock, return_value=TITLE), \
+             patch("handlers.settings_handler.get_system_messages", new_callable=AsyncMock, return_value=MESSAGES):
+            await on_settings(mock_update, mock_context)
+
+        assert "awaiting_prompt" not in mock_context.user_data
+        assert "awaiting_chat_prompt" not in mock_context.user_data
 
 
 class TestOnSettingsCallback:
@@ -197,7 +189,7 @@ class TestOnSettingsCallback:
             current_settings={},
         )
         keyboard = mock_callback_update.callback_query.edit_message_text.call_args.kwargs["reply_markup"]
-        assert keyboard.inline_keyboard[4][0].text == MESSAGES["settings_auto_reply_1m"]
+        assert keyboard.inline_keyboard[4][0].text == f"⏰ {MESSAGES['auto_reply_prefix']}: {MESSAGES['auto_reply_1m']}"
 
     @pytest.mark.asyncio
     async def test_cycles_style(self, mock_callback_update, mock_context):
@@ -222,6 +214,39 @@ class TestOnSettingsCallback:
         )
         keyboard = mock_callback_update.callback_query.edit_message_text.call_args.kwargs["reply_markup"]
         assert keyboard.inline_keyboard[1][0].text == expected_label
+
+    @pytest.mark.asyncio
+    async def test_opening_global_prompt_clears_chat_prompt_waiting_state(self, mock_callback_update, mock_context):
+        """Открытие глобального редактора сбрасывает awaiting_chat_prompt."""
+        mock_callback_update.callback_query.data = "settings:prompt"
+        mock_context.user_data["awaiting_chat_prompt"] = 100
+
+        messages = {
+            **MESSAGES,
+            "settings_prompt_no_prompt": "Set prompt",
+            "prompt_cancel": "Cancel",
+        }
+        with patch("handlers.settings_handler.ensure_effective_user", new_callable=AsyncMock, return_value={"settings": {}}), \
+             patch("handlers.settings_handler.get_system_messages", new_callable=AsyncMock, return_value=messages):
+            await on_settings_callback(mock_callback_update, mock_context)
+
+        assert mock_context.user_data["awaiting_prompt"] is True
+        assert "awaiting_chat_prompt" not in mock_context.user_data
+
+    @pytest.mark.asyncio
+    async def test_non_prompt_settings_action_clears_prompt_waiting_state(self, mock_callback_update, mock_context):
+        """Любое не-prompt действие в /settings сбрасывает режим ввода prompt."""
+        mock_callback_update.callback_query.data = "settings:auto_reply"
+        mock_context.user_data["awaiting_prompt"] = True
+        mock_context.user_data["awaiting_chat_prompt"] = 100
+
+        with patch("handlers.settings_handler.ensure_effective_user", new_callable=AsyncMock, return_value={"settings": {}}), \
+             patch("handlers.settings_handler.update_user_settings", new_callable=AsyncMock, return_value={"auto_reply": 60}), \
+             patch("handlers.settings_handler.get_system_messages", new_callable=AsyncMock, return_value=MESSAGES):
+            await on_settings_callback(mock_callback_update, mock_context)
+
+        assert "awaiting_prompt" not in mock_context.user_data
+        assert "awaiting_chat_prompt" not in mock_context.user_data
 
     @pytest.mark.asyncio
     async def test_cycles_timezone(self, mock_callback_update, mock_context):

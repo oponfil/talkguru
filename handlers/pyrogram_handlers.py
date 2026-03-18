@@ -32,6 +32,7 @@ from utils.utils import (
     get_effective_auto_reply,
     get_effective_drafts,
     get_effective_model,
+    get_effective_prompt,
     get_effective_style,
     get_timestamp,
     is_chat_ignored,
@@ -67,9 +68,9 @@ async def on_disconnect(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     asyncio.create_task(update_last_msg_at(u.id))
 
     is_active = pyrogram_client.is_active(u.id)
-    had_pending_2fa = await _cancel_pending_2fa(u.id)
+    had_pending_2fa = await cancel_pending_2fa(u.id)
     # bot передаём для удаления чувствительных сообщений при cancel
-    had_pending_phone = await _cancel_pending_phone(u.id, bot=context.bot)
+    had_pending_phone = await cancel_pending_phone(u.id, bot=context.bot)
 
     if DEBUG_PRINT:
         print(f"{get_timestamp()} [BOT] /disconnect from user {u.id} (@{u.username}, lang={u.language_code})")
@@ -181,7 +182,7 @@ async def _get_pending_phone(user_id: int, bot: object | None = None) -> dict | 
     if expires_at is None or time.monotonic() < expires_at:
         return pending
 
-    await _cancel_pending_phone(user_id, bot=bot)
+    await cancel_pending_phone(user_id, bot=bot)
     return None
 
 
@@ -194,7 +195,7 @@ async def _delete_sensitive_messages(bot: object, chat_id: int, msg_ids: list[in
             print(f"{get_timestamp()} [CONNECT_PHONE] Failed to delete message {mid}: {e}")
 
 
-async def _cancel_pending_phone(
+async def cancel_pending_phone(
     user_id: int, bot: object | None = None, client: Client | None = None,
 ) -> bool:
     """Отменяет незавершённый phone-логин, удаляет sensitive messages и чистит клиент."""
@@ -224,7 +225,7 @@ def _get_qr_login_task(user_id: int) -> asyncio.Task | None:
     return task
 
 
-async def _cancel_pending_2fa(user_id: int) -> bool:
+async def cancel_pending_2fa(user_id: int) -> bool:
     """Отменяет незавершённый 2FA-логин и очищает временный клиент."""
     pending = _pending_2fa.pop(user_id, None)
     if pending is None:
@@ -322,7 +323,7 @@ async def on_connect(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     except Exception as e:
         print(f"{get_timestamp()} [BOT] ERROR connect for user {u.id}: {e}")
         traceback.print_exc()
-        await _cancel_pending_phone(u.id, bot=context.bot)
+        await cancel_pending_phone(u.id, bot=context.bot)
         try:
             msg = await get_system_message(u.language_code, "connect_error")
             await reply(msg)
@@ -400,7 +401,7 @@ async def on_connect_qr_callback(update: Update, context: ContextTypes.DEFAULT_T
     u = update.effective_user
 
     # Отменяем phone-flow
-    await _cancel_pending_phone(u.id, bot=context.bot)
+    await cancel_pending_phone(u.id, bot=context.bot)
 
     # Проверяем, не подключён ли уже
     if pyrogram_client.is_active(u.id):
@@ -441,7 +442,7 @@ async def handle_connect_text(update: Update, context: ContextTypes.DEFAULT_TYPE
     if pending is not None:
         expires_at = pending.get("expires_at")
         if expires_at is not None and time.monotonic() >= expires_at:
-            await _cancel_pending_phone(u.id, bot=context.bot)
+            await cancel_pending_phone(u.id, bot=context.bot)
             msg = await get_system_message(
                 pending.get("language_code"),
                 _get_phone_timeout_message_key(pending.get("state", "")),
@@ -586,14 +587,14 @@ async def on_confirm_phone_callback(update: Update, context: ContextTypes.DEFAUL
                 msg = await get_system_message(language_code, "connect_flood_wait")
                 msg = msg.replace("{seconds}", str(seconds))
                 await context.bot.send_message(chat_id=chat_id, text=msg)
-                await _cancel_pending_phone(u.id, bot=context.bot, client=client)
+                await cancel_pending_phone(u.id, bot=context.bot, client=client)
                 return
 
             print(f"{get_timestamp()} [CONNECT_PHONE] ERROR send_code for user {u.id}: {e}")
             traceback.print_exc()
             msg = await get_system_message(language_code, "connect_error")
             await context.bot.send_message(chat_id=chat_id, text=msg)
-            await _cancel_pending_phone(u.id, bot=context.bot, client=client)
+            await cancel_pending_phone(u.id, bot=context.bot, client=client)
 
 
 @serialize_user_updates
@@ -646,10 +647,10 @@ async def on_connect_cancel_callback(update: Update, context: ContextTypes.DEFAU
         _qr_login_tasks.pop(u.id, None)
 
     # Отменяем 2FA-flow
-    await _cancel_pending_2fa(u.id)
+    await cancel_pending_2fa(u.id)
 
     # Отменяем phone-flow (удаляет чувствительные сообщения)
-    await _cancel_pending_phone(u.id, bot=context.bot)
+    await cancel_pending_phone(u.id, bot=context.bot)
 
     # Убираем кнопку
     try:
@@ -712,7 +713,7 @@ async def _handle_phone_code(
                 print(f"{get_timestamp()} [CONNECT_PHONE] WARNING: code without separator for user {u.id}, session burned")
                 msg = await get_system_message(language_code, "connect_code_no_separator")
                 await context.bot.send_message(chat_id=chat_id, text=msg)
-                await _cancel_pending_phone(u.id, bot=context.bot)
+                await cancel_pending_phone(u.id, bot=context.bot)
             else:
                 # Нормальный неверный код — остаёмся в awaiting_code
                 print(f"{get_timestamp()} [CONNECT_PHONE] WARNING: invalid code for user {u.id}")
@@ -728,14 +729,14 @@ async def _handle_phone_code(
                 hint = await get_system_message(language_code, "connect_code_no_separator")
                 msg = f"{msg}\n\n{hint}"
             await context.bot.send_message(chat_id=chat_id, text=msg)
-            await _cancel_pending_phone(u.id, bot=context.bot)
+            await cancel_pending_phone(u.id, bot=context.bot)
             raise ApplicationHandlerStop
 
         print(f"{get_timestamp()} [CONNECT_PHONE] ERROR sign_in for user {u.id}: {e}")
         traceback.print_exc()
         msg = await get_system_message(language_code, "connect_error")
         await context.bot.send_message(chat_id=chat_id, text=msg)
-        await _cancel_pending_phone(u.id, bot=context.bot)
+        await cancel_pending_phone(u.id, bot=context.bot)
 
     raise ApplicationHandlerStop
 
@@ -787,7 +788,7 @@ async def _handle_phone_2fa(
         traceback.print_exc()
         msg = await get_system_message(language_code, "connect_2fa_error")
         await context.bot.send_message(chat_id=chat_id, text=msg)
-        await _cancel_pending_phone(u.id, bot=context.bot)
+        await cancel_pending_phone(u.id, bot=context.bot)
 
     raise ApplicationHandlerStop
 
@@ -1238,7 +1239,7 @@ async def on_pyrogram_message(user_id: int, pyrogram_client_instance, message) -
         model = get_effective_model(user_settings, style)
         if model:
             kwargs["model"] = model
-        custom_prompt = user_settings.get("custom_prompt", "")
+        custom_prompt = get_effective_prompt(user_settings, chat_id)
         tz_offset = user_settings.get("tz_offset", 0) or 0
         reply_text = await generate_reply(history, user, opponent_info, custom_prompt=custom_prompt, style=style, tz_offset=tz_offset, **kwargs)
         if not reply_text or not reply_text.strip():
@@ -1310,7 +1311,7 @@ async def _generate_reply_for_chat(
         model = get_effective_model(user_settings, style)
         if model:
             kwargs["model"] = model
-        custom_prompt = user_settings.get("custom_prompt", "")
+        custom_prompt = get_effective_prompt(user_settings, chat_id)
         tz_offset = user_settings.get("tz_offset", 0) or 0
         reply_text = await generate_reply(
             history, user, opponent_info,
@@ -1399,7 +1400,7 @@ async def _regenerate_reply(user_id: int, chat_id: int) -> None:
         model = get_effective_model(user_settings, style)
         if model:
             kwargs["model"] = model
-        custom_prompt = user_settings.get("custom_prompt", "")
+        custom_prompt = get_effective_prompt(user_settings, chat_id)
         tz_offset = user_settings.get("tz_offset", 0) or 0
         reply_text = await generate_reply(
             history, user, opponent_info,
@@ -1657,7 +1658,7 @@ async def on_pyrogram_draft(user_id: int, chat_id: int, draft_text: str) -> None
             "user_message": user_message,
             "system_prompt": build_draft_prompt(
                 has_history=bool(history),
-                custom_prompt=user_settings.get("custom_prompt", ""),
+                custom_prompt=get_effective_prompt(user_settings, chat_id),
                 style=style,
             ),
         }

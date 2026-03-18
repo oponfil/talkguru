@@ -351,3 +351,28 @@ async def update_chat_auto_reply(user_id: int, chat_id: int, value: int | None) 
     return await update_user_settings(
         user_id, {"chat_auto_replies": chat_auto_replies}, current_settings=settings,
     )
+
+
+async def update_chat_prompt(user_id: int, chat_id: int, prompt: str | None) -> dict | None:
+    """Устанавливает per-chat системный промпт (None = сброс).
+
+    Args:
+        user_id: ID пользователя
+        chat_id: ID чата
+        prompt: Текст промпта или None для сброса
+
+    Returns:
+        Merged-настройки при успехе, None при ошибке.
+    """
+    user = await get_user(user_id)
+    settings = (user or {}).get("settings") or {}
+    chat_prompts = dict(settings.get("chat_prompts") or {})
+
+    if prompt is None or prompt == "":
+        chat_prompts.pop(str(chat_id), None)
+    else:
+        chat_prompts[str(chat_id)] = prompt
+
+    return await update_user_settings(
+        user_id, {"chat_prompts": chat_prompts}, current_settings=settings,
+    )

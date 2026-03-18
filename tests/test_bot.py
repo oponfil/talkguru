@@ -252,7 +252,7 @@ class TestOnText:
         mock_update.message.text = "A" * 601
         mock_context.user_data["awaiting_prompt"] = True
 
-        with patch("handlers.bot_handlers.CUSTOM_PROMPT_MAX_LENGTH", 600), \
+        with patch("handlers.bot_handlers.USER_PROMPT_MAX_LENGTH", 600), \
              patch("handlers.bot_handlers.update_user_settings", new_callable=AsyncMock, return_value=True) as mock_update_settings, \
              patch("handlers.bot_handlers.get_system_message", new_callable=AsyncMock, return_value="Промпт обрезан и сохранён"):
             await on_text(mock_update, mock_context)
@@ -263,6 +263,52 @@ class TestOnText:
         )
         mock_update.message.reply_text.assert_called_once_with("Промпт обрезан и сохранён")
         assert "awaiting_prompt" not in mock_context.user_data
+
+    @pytest.mark.asyncio
+    async def test_saving_global_prompt_clears_stale_chat_prompt_state(self, mock_update, mock_context):
+        """Успешное сохранение глобального промпта очищает и stale per-chat awaiting."""
+        mock_update.message.text = "Будь короче"
+        mock_context.user_data["awaiting_prompt"] = True
+        mock_context.user_data["awaiting_chat_prompt"] = 100
+
+        with patch("handlers.bot_handlers.update_user_settings", new_callable=AsyncMock, return_value=True), \
+             patch("handlers.bot_handlers.get_system_message", new_callable=AsyncMock, return_value="Сохранено"):
+            await on_text(mock_update, mock_context)
+
+        assert "awaiting_prompt" not in mock_context.user_data
+        assert "awaiting_chat_prompt" not in mock_context.user_data
+
+    @pytest.mark.asyncio
+    async def test_saving_chat_prompt_clears_stale_global_prompt_state(self, mock_update, mock_context):
+        """Успешное сохранение per-chat промпта очищает stale awaiting_prompt."""
+        mock_update.message.text = "Будь формальнее"
+        mock_context.user_data["awaiting_prompt"] = True
+        mock_context.user_data["awaiting_chat_prompt"] = 100
+
+        with patch("handlers.bot_handlers.update_chat_prompt", new_callable=AsyncMock, return_value=True), \
+             patch("handlers.bot_handlers.get_system_message", new_callable=AsyncMock, return_value="Сохранено"):
+            await on_text(mock_update, mock_context)
+
+        assert "awaiting_prompt" not in mock_context.user_data
+        assert "awaiting_chat_prompt" not in mock_context.user_data
+
+    @pytest.mark.asyncio
+    async def test_empty_chat_prompt_is_treated_as_clear(self, mock_update, mock_context):
+        """Пустой per-chat промпт очищает настройку вместо сохранения пустой строки."""
+        mock_update.message.text = "   "
+        mock_context.user_data["awaiting_chat_prompt"] = 100
+
+        with patch("handlers.bot_handlers.update_chat_prompt", new_callable=AsyncMock, return_value=True) as mock_update_prompt, \
+             patch("handlers.bot_handlers.get_system_message", new_callable=AsyncMock, return_value="Промпт очищен"):
+            await on_text(mock_update, mock_context)
+
+        mock_update_prompt.assert_called_once_with(
+            mock_update.effective_user.id,
+            100,
+            None,
+        )
+        mock_update.message.reply_text.assert_called_once_with("Промпт очищен")
+        assert "awaiting_chat_prompt" not in mock_context.user_data
 
 
 class TestOnError:

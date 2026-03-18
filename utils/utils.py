@@ -260,3 +260,32 @@ def is_chat_ignored(settings: dict, chat_id: int) -> bool:
     """Возвращает True, если чат помечен как игнорируемый (per-chat sentinel -1)."""
     chat_auto_replies = settings.get("chat_auto_replies") or {}
     return chat_auto_replies.get(str(chat_id)) == CHAT_IGNORED_SENTINEL
+
+
+def get_effective_prompt(settings: dict, chat_id: int | None = None) -> str:
+    """Возвращает итоговый промпт: глобальный + per-chat (через \\n).
+
+    Args:
+        settings: Настройки пользователя
+        chat_id: ID чата (None → только глобальный промпт)
+
+    Returns:
+        Конкатенация глобального и per-chat промптов
+    """
+    global_prompt = settings.get("custom_prompt", "") or ""
+    if chat_id is None:
+        return global_prompt
+    chat_prompts = settings.get("chat_prompts") or {}
+    per_chat = chat_prompts.get(str(chat_id), "") or ""
+    if global_prompt and per_chat:
+        return f"{global_prompt}\n{per_chat}"
+    return global_prompt or per_chat
+
+
+async def clear_pending_input(context: object, user_id: int, bot: object) -> None:
+    """Сбрасывает все состояния ожидания текстового ввода (prompt + connect flow)."""
+    context.user_data.pop("awaiting_prompt", None)
+    context.user_data.pop("awaiting_chat_prompt", None)
+    from handlers.pyrogram_handlers import cancel_pending_2fa, cancel_pending_phone  # circular dependency
+    await cancel_pending_2fa(user_id)
+    await cancel_pending_phone(user_id, bot=bot)

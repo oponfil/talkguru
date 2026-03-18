@@ -70,7 +70,7 @@ python bot.py
 |---------|-------------|
 | `/start` | Welcome message and quick usage guide |
 | `/settings` | Settings: drafts, model (FREE/PRO), prompt, communication style, auto-reply timer, timezone |
-| `/chats` | Per-chat settings: individual style and auto-reply timer for each chat (connected users only) |
+| `/chats` | Per-chat settings: individual style, auto-reply timer, and system prompt for each chat (connected users only) |
 | `/status` | Connection status |
 | `/connect` | Connect Telegram account via phone or QR code (supports 2FA) |
 | `/disconnect` | Disconnect account (idempotent: stops listener and clears session in DB) |
@@ -94,8 +94,9 @@ By default, `/connect` prompts for a phone number. A button below the message le
 
 ### Per-chat Settings (`/chats`)
 
-The `/chats` command shows only chats where the bot has actually set a draft or replied, as well as chats with custom settings. Each chat has two buttons:
+The `/chats` command shows only chats where the bot has actually set a draft or replied, as well as chats with custom settings. Each chat has three buttons:
 
+- **Prompt** (`📝`) — tap to open the prompt editor for this chat. Shows the current prompt and lets you set a new one, clear it, or cancel. Per-chat prompt is appended to the global prompt (max 300 chars).
 - **Style** (`🦉 Name`) — tap to cycle through styles
 - **Auto-reply** (`⏰`) — tap to cycle through auto-reply timers for this chat. The last option in the cycle is **🔇 Ignore** — fully disables drafts, auto-replies, and message polling for that chat.
 
