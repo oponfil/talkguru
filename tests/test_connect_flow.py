@@ -165,8 +165,11 @@ class TestHandlePhoneNumber:
             with pytest.raises(ApplicationHandlerStop):
                 await handle_connect_text(mock_update, mock_context)
 
-        # Оба ID сохранены
-        assert _pending_phone[user_id]["sensitive_msg_ids"] == [42, 99]
+        # Предыдущий (42), текущий (99) и бот-сообщение подтверждения — все сохранены
+        ids = _pending_phone[user_id]["sensitive_msg_ids"]
+        assert 42 in ids
+        assert 99 in ids
+        assert len(ids) == 3  # 42 + 99 + bot confirmation message
 
 
 # ====== on_confirm_phone_callback ======
@@ -231,8 +234,10 @@ class TestOnConfirmPhoneCallback:
 
         assert _pending_phone[user_id]["state"] == "awaiting_code"
         assert _pending_phone[user_id]["phone_code_hash"] == "hash123"
-        # sensitive_msg_ids пробрасываются
-        assert _pending_phone[user_id]["sensitive_msg_ids"] == [42]
+        # sensitive_msg_ids: оригинальный (42) + code prompt msg
+        ids = _pending_phone[user_id]["sensitive_msg_ids"]
+        assert 42 in ids
+        assert len(ids) == 2  # 42 + code prompt msg
 
     @pytest.mark.asyncio
     async def test_phone_invalid_returns_to_awaiting_phone(self):

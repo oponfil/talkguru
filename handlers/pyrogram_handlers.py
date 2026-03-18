@@ -468,14 +468,29 @@ async def handle_connect_text(update: Update, context: ContextTypes.DEFAULT_TYPE
 async def _handle_phone_number(
     update: Update, context: ContextTypes.DEFAULT_TYPE, pending: dict,
 ) -> None:
-    """Обработка ввода номера телефона — показываем подтверждение."""
+    """Обработка ввода номера телефона — валидируем и показываем подтверждение."""
     u = update.effective_user
-    phone_number = (update.message.text or "").strip()
-    # Нормализация: добавляем "+", если пользователь не указал
-    if phone_number and not phone_number.startswith("+"):
-        phone_number = "+" + phone_number
+    raw_input = (update.message.text or "").strip()
+    # Нормализация: извлекаем только цифры, добавляем "+"
+    # Принимает любой формат: +1 234 567 890, +49-123-4567, (+7) 999...
+    digits = re.sub(r"\D", "", raw_input)
+    phone_number = f"+{digits}"
     language_code = pending["language_code"]
     chat_id = pending["chat_id"]
+
+    # Базовая валидация: минимум 7 цифр (E.164 minimum)
+    if len(digits) < 7:
+        # Сохраняем ID сообщения с номером для отложенного удаления (privacy)
+        sensitive_msg_ids = list(pending.get("sensitive_msg_ids") or [])
+        sensitive_msg_ids.append(update.message.message_id)
+        _put_pending_phone(u.id, {
+            **pending,
+            "sensitive_msg_ids": sensitive_msg_ids,
+        })
+        # Невалидный номер — просим ввести заново, остаёмся в awaiting_phone
+        msg = await get_system_message(language_code, "connect_phone_invalid")
+        await context.bot.send_message(chat_id=chat_id, text=msg)
+        raise ApplicationHandlerStop
 
     # Собираем ID сообщения для отложенного удаления
     sensitive_msg_ids = list(pending.get("sensitive_msg_ids") or [])
@@ -490,16 +505,20 @@ async def _handle_phone_number(
         "sensitive_msg_ids": sensitive_msg_ids,
     })
 
-    # Показываем номер и кнопки Да / Нет
+    # Показываем нормализованный номер и кнопки Да / Нет (в один ряд)
     msg = await get_system_message(language_code, "connect_phone_confirm")
     msg = msg.replace("{phone_number}", phone_number)
     confirm_label = await get_system_message(language_code, "connect_phone_btn_confirm")
     cancel_label = await get_system_message(language_code, "connect_phone_btn_cancel")
     keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton(confirm_label, callback_data="connect:confirm_phone")],
-        [InlineKeyboardButton(cancel_label, callback_data="connect:cancel_phone")],
+        [
+            InlineKeyboardButton(confirm_label, callback_data="connect:confirm_phone"),
+            InlineKeyboardButton(cancel_label, callback_data="connect:cancel_phone"),
+        ],
     ])
-    await context.bot.send_message(chat_id=chat_id, text=msg, reply_markup=keyboard)
+    sent = await context.bot.send_message(chat_id=chat_id, text=msg, reply_markup=keyboard)
+    # Запоминаем ID бот-сообщения для удаления при завершении flow
+    sensitive_msg_ids.append(sent.message_id)
 
     raise ApplicationHandlerStop
 
@@ -522,6 +541,9 @@ async def on_confirm_phone_callback(update: Update, context: ContextTypes.DEFAUL
     language_code = pending["language_code"]
     chat_id = pending["chat_id"]
     client: Client | None = None
+
+    # confirm message уже отслеживается из _handle_phone_number
+    sensitive_msg_ids = list(pending.get("sensitive_msg_ids") or [])
 
     # Убираем кнопки — оставляем только текст
     try:
@@ -552,7 +574,7 @@ async def on_confirm_phone_callback(update: Update, context: ContextTypes.DEFAUL
                 "phone_code_hash": sent_code.phone_code_hash,
                 "language_code": language_code,
                 "chat_id": chat_id,
-                "sensitive_msg_ids": pending.get("sensitive_msg_ids") or [],
+                "sensitive_msg_ids": sensitive_msg_ids,
             })
 
             msg = await get_system_message(language_code, "connect_code_prompt")
@@ -560,7 +582,9 @@ async def on_confirm_phone_callback(update: Update, context: ContextTypes.DEFAUL
             keyboard = InlineKeyboardMarkup([
                 [InlineKeyboardButton(cancel_label, callback_data="connect:cancel")]
             ])
-            await context.bot.send_message(chat_id=chat_id, text=msg, reply_markup=keyboard)
+            sent = await context.bot.send_message(chat_id=chat_id, text=msg, reply_markup=keyboard)
+            # Запоминаем ID сообщения с просьбой ввести код
+            sensitive_msg_ids.append(sent.message_id)
 
             if DEBUG_PRINT:
                 print(f"{get_timestamp()} [CONNECT_PHONE] Code sent to user {u.id}")
@@ -708,27 +732,26 @@ async def _handle_phone_code(
             raise ApplicationHandlerStop
 
         if "PhoneCodeInvalid" in error_name:
+            # Неверный код — остаёмся в awaiting_code, даём попробовать ещё раз
+            print(f"{get_timestamp()} [CONNECT_PHONE] WARNING: invalid code for user {u.id}")
+            _put_pending_phone(u.id, pending)
+            msg = await get_system_message(language_code, "connect_code_invalid")
+            await context.bot.send_message(chat_id=chat_id, text=msg)
             if raw_code.isdigit():
-                # Код без разделителя — Telegram сжёг его, /connect заново
-                print(f"{get_timestamp()} [CONNECT_PHONE] WARNING: code without separator for user {u.id}, session burned")
-                msg = await get_system_message(language_code, "connect_code_no_separator")
-                await context.bot.send_message(chat_id=chat_id, text=msg)
-                await cancel_pending_phone(u.id, bot=context.bot)
-            else:
-                # Нормальный неверный код — остаёмся в awaiting_code
-                print(f"{get_timestamp()} [CONNECT_PHONE] WARNING: invalid code for user {u.id}")
-                _put_pending_phone(u.id, pending)
-                msg = await get_system_message(language_code, "connect_code_invalid")
-                await context.bot.send_message(chat_id=chat_id, text=msg)
+                hint = await get_system_message(language_code, "connect_code_no_separator")
+                await context.bot.send_message(chat_id=chat_id, text=hint)
             raise ApplicationHandlerStop
 
         if "PhoneCodeExpired" in error_name:
             print(f"{get_timestamp()} [CONNECT_PHONE] WARNING: code expired for user {u.id}")
-            msg = await get_system_message(language_code, "connect_code_expired")
             if raw_code.isdigit():
                 hint = await get_system_message(language_code, "connect_code_no_separator")
-                msg = f"{msg}\n\n{hint}"
-            await context.bot.send_message(chat_id=chat_id, text=msg)
+                await context.bot.send_message(chat_id=chat_id, text=hint)
+                blocked = await get_system_message(language_code, "connect_code_blocked")
+                await context.bot.send_message(chat_id=chat_id, text=blocked)
+            else:
+                msg = await get_system_message(language_code, "connect_code_expired")
+                await context.bot.send_message(chat_id=chat_id, text=msg)
             await cancel_pending_phone(u.id, bot=context.bot)
             raise ApplicationHandlerStop
 

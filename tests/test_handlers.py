@@ -1053,8 +1053,8 @@ class TestConnectPhoneFlow:
         assert 42 in _pending_phone[user_id]["sensitive_msg_ids"]
 
     @pytest.mark.asyncio
-    async def test_invalid_phone_number_goes_to_confirm_first(self, mock_update, mock_context):
-        """Невалидный номер → сначала подтверждение, ошибка при отправке кода тестируется в test_connect_flow.py."""
+    async def test_invalid_phone_number_rejected_immediately(self, mock_update, mock_context):
+        """Невалидный номер → ошибка сразу, остаёмся в awaiting_phone."""
         user_id = mock_update.effective_user.id
         _pending_phone[user_id] = {
             "state": "awaiting_phone",
@@ -1065,13 +1065,17 @@ class TestConnectPhoneFlow:
         mock_update.message.text = "invalid"
         mock_update.message.message_id = 55
 
-        with patch("handlers.pyrogram_handlers.get_system_message", new_callable=AsyncMock, return_value="Confirm {phone_number}"):
+        with patch("handlers.pyrogram_handlers.get_system_message", new_callable=AsyncMock, return_value="Invalid phone"):
             with pytest.raises(ApplicationHandlerStop):
                 await handle_connect_text(mock_update, mock_context)
 
-        # Номер нормализован и сохранён в awaiting_confirm
-        assert _pending_phone[user_id]["state"] == "awaiting_confirm"
-        assert _pending_phone[user_id]["phone_number"] == "+invalid"
+        # Остаёмся в awaiting_phone — не перешли в awaiting_confirm
+        assert _pending_phone[user_id]["state"] == "awaiting_phone"
+        # Сообщение с невалидным номером сохранено для удаления (privacy)
+        assert 55 in _pending_phone[user_id]["sensitive_msg_ids"]
+        mock_context.bot.send_message.assert_called_once_with(
+            chat_id=mock_update.effective_chat.id, text="Invalid phone",
+        )
 
     @pytest.mark.asyncio
     async def test_phone_code_success_saves_session(self, mock_update, mock_context):
@@ -1188,8 +1192,8 @@ class TestConnectPhoneFlow:
         assert _pending_phone[user_id]["state"] == "awaiting_code"
 
     @pytest.mark.asyncio
-    async def test_phone_code_invalid_pure_digits_shows_no_separator_hint(self, mock_update, mock_context):
-        """Чистые цифры без разделителя + PhoneCodeInvalid → hint про разделитель."""
+    async def test_phone_code_invalid_pure_digits_shows_both_messages(self, mock_update, mock_context):
+        """Чистые цифры без разделителя + PhoneCodeInvalid → ошибка + hint про разделитель."""
         user_id = mock_update.effective_user.id
         mock_client = AsyncMock()
 
@@ -1210,15 +1214,20 @@ class TestConnectPhoneFlow:
         mock_update.message.text = "99999"
 
         with patch("handlers.pyrogram_handlers.get_system_message", new_callable=AsyncMock) as mock_msg:
-            mock_msg.return_value = "No separator hint"
+            mock_msg.side_effect = lambda lang, key: f"[{key}]"
             with pytest.raises(ApplicationHandlerStop):
                 await handle_connect_text(mock_update, mock_context)
-            # Должен запросить connect_code_no_separator, а не connect_code_invalid
-            mock_msg.assert_any_call("en", "connect_code_no_separator")
 
-        # Flow завершён — код сожжён, нужен /connect заново
-        assert user_id not in _pending_phone
-        mock_client.disconnect.assert_called_once()
+        # Остаёмся в awaiting_code
+        assert _pending_phone[user_id]["state"] == "awaiting_code"
+        # Два сообщения: invalid + hint про разделитель
+        assert mock_context.bot.send_message.call_count == 2
+        mock_context.bot.send_message.assert_any_call(
+            chat_id=mock_update.effective_chat.id, text="[connect_code_invalid]",
+        )
+        mock_context.bot.send_message.assert_any_call(
+            chat_id=mock_update.effective_chat.id, text="[connect_code_no_separator]",
+        )
 
     @pytest.mark.asyncio
     async def test_phone_code_expired_shows_error(self, mock_update, mock_context):
