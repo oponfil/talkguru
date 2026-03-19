@@ -7,7 +7,7 @@ from telegram import Update
 from telegram.ext import ContextTypes
 
 from config import (
-    CHAT_STYLES_DIALOGS_LIMIT,
+    ACTIVE_CHATS_LIMIT,
     DEBUG_PRINT,
     IGNORED_CHAT_IDS,
     POKE_FOLLOW_UP_TIMEOUT,
@@ -51,21 +51,19 @@ async def on_poke(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text(msg)
         return
 
-    # Одно сообщение — «проверяю»
-    msg = await get_system_message(language_code, "poke_scanning")
-    await update.message.reply_text(msg)
-
     if DEBUG_PRINT:
         print(f"{get_timestamp()} [POKE] /poke from user {u.id}")
 
     # Получаем список чатов
-    chat_ids = await pyrogram_client.get_private_dialogs(u.id, limit=CHAT_STYLES_DIALOGS_LIMIT)
+    chat_ids = await pyrogram_client.get_private_dialogs(u.id, limit=ACTIVE_CHATS_LIMIT)
 
     user = await get_user(u.id)
     user_settings = (user or {}).get("settings") or {}
     lang = (user or {}).get("language_code")
 
     now = datetime.now(tz=timezone.utc)
+    checked = 0
+    drafts = 0
 
     for chat_id in chat_ids:
         # Global ignore
@@ -78,10 +76,13 @@ async def on_poke(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
         key = (u.id, chat_id)
 
+        checked += 1
+
         # Уже есть черновик или идёт генерация — пропускаем
         if _reply_locks.get(key) or _bot_drafts.get(key):
             continue
 
+        # Пустой чат или ошибка чтения — нечего анализировать
         last_msg = await pyrogram_client.get_last_message(u.id, chat_id)
         if not last_msg:
             continue
@@ -114,6 +115,7 @@ async def on_poke(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         _bot_draft_echoes[key] = probe_text
         await pyrogram_client.set_draft(u.id, chat_id, probe_text)
 
+        drafts += 1
         asyncio.create_task(
             _generate_reply_for_chat(u.id, chat_id, user, user_settings, lang)
         )
@@ -121,3 +123,8 @@ async def on_poke(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if DEBUG_PRINT:
             direction = "follow-up" if last_msg.outgoing else "unanswered"
             print(f"{get_timestamp()} [POKE] Generating {direction} draft for user {u.id} in chat {chat_id}")
+
+    # Итоговое сообщение с конкретными цифрами
+    result_key = "poke_result" if drafts else "poke_result_none"
+    result_msg = await get_system_message(language_code, result_key)
+    await update.message.reply_text(result_msg.format(checked=checked, drafts=drafts))

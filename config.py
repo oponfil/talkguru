@@ -154,7 +154,7 @@ STYLE_OPTIONS: dict[str, str] = {
 }
 
 # Количество чатов в /styles для отображения
-CHAT_STYLES_DIALOGS_LIMIT = 16
+ACTIVE_CHATS_LIMIT = 16
 
 # ====== ЧАСОВОЙ ПОЯС ======
 # 30 популярных UTC-смещений (часы); дробные: +3.5 Иран, +4.5 Афганистан,

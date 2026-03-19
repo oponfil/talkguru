@@ -36,6 +36,18 @@ def _make_message(outgoing: bool = False, age_seconds: int = 0, from_bot: bool =
     return msg
 
 
+def _sys_msg_side_effect(*args, **kwargs):
+    """Side-effect для get_system_message: возвращает разные строки по ключу."""
+    key = args[1] if len(args) > 1 else kwargs.get("key", "")
+    mapping = {
+        "status_disconnected": "Connect first",
+        "poke_result": "Checked {checked} chats — generating {drafts} drafts.",
+        "poke_result_none": "Checked {checked} chats — no drafts needed.",
+        "draft_typing": "{emoji} is typing...",
+    }
+    return mapping.get(key, key)
+
+
 class TestOnPoke:
     """Тесты для on_poke()."""
 
@@ -48,7 +60,7 @@ class TestOnPoke:
         with patch("handlers.poke_handler.pyrogram_client") as mock_pc, \
              patch("handlers.poke_handler.ensure_effective_user", new_callable=AsyncMock), \
              patch("handlers.poke_handler.update_last_msg_at", new_callable=AsyncMock), \
-             patch("handlers.poke_handler.get_system_message", new_callable=AsyncMock, return_value="Connect first"):
+             patch("handlers.poke_handler.get_system_message", new_callable=AsyncMock, side_effect=_sys_msg_side_effect):
             mock_pc.is_active = MagicMock(return_value=False)
 
             await on_poke(update, context)
@@ -57,7 +69,7 @@ class TestOnPoke:
 
     @pytest.mark.asyncio
     async def test_unanswered_incoming_generates_draft(self):
-        """Входящее сообщение без черновика → генерация."""
+        """Входящее сообщение без черновика → генерация + результат с drafts=1."""
         user_id = 123
         chat_id = 456
         update = _make_update(user_id=user_id)
@@ -68,7 +80,7 @@ class TestOnPoke:
         with patch("handlers.poke_handler.pyrogram_client") as mock_pc, \
              patch("handlers.poke_handler.ensure_effective_user", new_callable=AsyncMock), \
              patch("handlers.poke_handler.update_last_msg_at", new_callable=AsyncMock), \
-             patch("handlers.poke_handler.get_system_message", new_callable=AsyncMock, return_value="Scanning"), \
+             patch("handlers.poke_handler.get_system_message", new_callable=AsyncMock, side_effect=_sys_msg_side_effect), \
              patch("handlers.poke_handler.get_user", new_callable=AsyncMock, return_value={"settings": {}}), \
              patch("handlers.poke_handler._is_user_typing", new_callable=AsyncMock, return_value=False), \
              patch("handlers.poke_handler._generate_reply_for_chat", new_callable=AsyncMock) as mock_gen:
@@ -83,10 +95,15 @@ class TestOnPoke:
             await on_poke(update, context)
 
         mock_gen.assert_called_once_with(user_id, chat_id, {"settings": {}}, {}, None)
+        # result only
+        update.message.reply_text.assert_called_once()
+        result_call = update.message.reply_text.call_args_list[-1]
+        assert "1 chats" in result_call.args[0]
+        assert "1 drafts" in result_call.args[0]
 
     @pytest.mark.asyncio
     async def test_incoming_with_existing_draft_skipped(self):
-        """Входящее с существующим черновиком → пропуск."""
+        """Входящее с существующим черновиком → пропуск, drafts=0."""
         user_id = 123
         chat_id = 456
         update = _make_update(user_id=user_id)
@@ -95,7 +112,7 @@ class TestOnPoke:
         with patch("handlers.poke_handler.pyrogram_client") as mock_pc, \
              patch("handlers.poke_handler.ensure_effective_user", new_callable=AsyncMock), \
              patch("handlers.poke_handler.update_last_msg_at", new_callable=AsyncMock), \
-             patch("handlers.poke_handler.get_system_message", new_callable=AsyncMock, return_value="Scanning"), \
+             patch("handlers.poke_handler.get_system_message", new_callable=AsyncMock, side_effect=_sys_msg_side_effect), \
              patch("handlers.poke_handler.get_user", new_callable=AsyncMock, return_value={"settings": {}}), \
              patch("handlers.poke_handler._is_user_typing", new_callable=AsyncMock, return_value=False), \
              patch("handlers.poke_handler._generate_reply_for_chat", new_callable=AsyncMock) as mock_gen:
@@ -107,11 +124,15 @@ class TestOnPoke:
             await on_poke(update, context)
 
         mock_gen.assert_not_called()
+        # result_none only
+        update.message.reply_text.assert_called_once()
+        result_call = update.message.reply_text.call_args_list[-1]
+        assert "no drafts needed" in result_call.args[0]
         _bot_drafts.pop((user_id, chat_id), None)
 
     @pytest.mark.asyncio
     async def test_outgoing_fresh_skipped(self):
-        """Исходящее свежее (< 12ч) → пропуск."""
+        """Исходящее свежее (< 12ч) → пропуск, drafts=0."""
         user_id = 123
         chat_id = 456
         update = _make_update(user_id=user_id)
@@ -122,7 +143,7 @@ class TestOnPoke:
         with patch("handlers.poke_handler.pyrogram_client") as mock_pc, \
              patch("handlers.poke_handler.ensure_effective_user", new_callable=AsyncMock), \
              patch("handlers.poke_handler.update_last_msg_at", new_callable=AsyncMock), \
-             patch("handlers.poke_handler.get_system_message", new_callable=AsyncMock, return_value="Scanning"), \
+             patch("handlers.poke_handler.get_system_message", new_callable=AsyncMock, side_effect=_sys_msg_side_effect), \
              patch("handlers.poke_handler.get_user", new_callable=AsyncMock, return_value={"settings": {}}), \
              patch("handlers.poke_handler._is_user_typing", new_callable=AsyncMock, return_value=False), \
              patch("handlers.poke_handler._generate_reply_for_chat", new_callable=AsyncMock) as mock_gen:
@@ -136,10 +157,15 @@ class TestOnPoke:
             await on_poke(update, context)
 
         mock_gen.assert_not_called()
+        # result_none only (checked=1, drafts=0)
+        update.message.reply_text.assert_called_once()
+        result_call = update.message.reply_text.call_args_list[-1]
+        assert "1 chats" in result_call.args[0]
+        assert "no drafts needed" in result_call.args[0]
 
     @pytest.mark.asyncio
     async def test_outgoing_old_generates_followup(self):
-        """Исходящее старое (> 12ч) → follow-up генерация."""
+        """Исходящее старое (> 12ч) → follow-up генерация, drafts=1."""
         user_id = 123
         chat_id = 456
         update = _make_update(user_id=user_id)
@@ -150,7 +176,7 @@ class TestOnPoke:
         with patch("handlers.poke_handler.pyrogram_client") as mock_pc, \
              patch("handlers.poke_handler.ensure_effective_user", new_callable=AsyncMock), \
              patch("handlers.poke_handler.update_last_msg_at", new_callable=AsyncMock), \
-             patch("handlers.poke_handler.get_system_message", new_callable=AsyncMock, return_value="Scanning"), \
+             patch("handlers.poke_handler.get_system_message", new_callable=AsyncMock, side_effect=_sys_msg_side_effect), \
              patch("handlers.poke_handler.get_user", new_callable=AsyncMock, return_value={"settings": {}}), \
              patch("handlers.poke_handler._is_user_typing", new_callable=AsyncMock, return_value=False), \
              patch("handlers.poke_handler._generate_reply_for_chat", new_callable=AsyncMock) as mock_gen:
@@ -165,6 +191,10 @@ class TestOnPoke:
             await on_poke(update, context)
 
         mock_gen.assert_called_once()
+        # result only
+        update.message.reply_text.assert_called_once()
+        result_call = update.message.reply_text.call_args_list[-1]
+        assert "1 drafts" in result_call.args[0]
 
     @pytest.mark.asyncio
     async def test_ignored_chat_skipped(self):
@@ -179,7 +209,7 @@ class TestOnPoke:
         with patch("handlers.poke_handler.pyrogram_client") as mock_pc, \
              patch("handlers.poke_handler.ensure_effective_user", new_callable=AsyncMock), \
              patch("handlers.poke_handler.update_last_msg_at", new_callable=AsyncMock), \
-             patch("handlers.poke_handler.get_system_message", new_callable=AsyncMock, return_value="Scanning"), \
+             patch("handlers.poke_handler.get_system_message", new_callable=AsyncMock, side_effect=_sys_msg_side_effect), \
              patch("handlers.poke_handler.get_user", new_callable=AsyncMock, return_value={"settings": settings}), \
              patch("handlers.poke_handler._is_user_typing", new_callable=AsyncMock, return_value=False), \
              patch("handlers.poke_handler._generate_reply_for_chat", new_callable=AsyncMock) as mock_gen:
@@ -203,7 +233,7 @@ class TestOnPoke:
         with patch("handlers.poke_handler.pyrogram_client") as mock_pc, \
              patch("handlers.poke_handler.ensure_effective_user", new_callable=AsyncMock), \
              patch("handlers.poke_handler.update_last_msg_at", new_callable=AsyncMock), \
-             patch("handlers.poke_handler.get_system_message", new_callable=AsyncMock, return_value="Scanning"), \
+             patch("handlers.poke_handler.get_system_message", new_callable=AsyncMock, side_effect=_sys_msg_side_effect), \
              patch("handlers.poke_handler.get_user", new_callable=AsyncMock, return_value={"settings": {}}), \
              patch("handlers.poke_handler._is_user_typing", new_callable=AsyncMock, return_value=False), \
              patch("handlers.poke_handler._generate_reply_for_chat", new_callable=AsyncMock) as mock_gen:
@@ -231,7 +261,7 @@ class TestOnPoke:
         with patch("handlers.poke_handler.pyrogram_client") as mock_pc, \
              patch("handlers.poke_handler.ensure_effective_user", new_callable=AsyncMock), \
              patch("handlers.poke_handler.update_last_msg_at", new_callable=AsyncMock), \
-             patch("handlers.poke_handler.get_system_message", new_callable=AsyncMock, return_value="Scanning"), \
+             patch("handlers.poke_handler.get_system_message", new_callable=AsyncMock, side_effect=_sys_msg_side_effect), \
              patch("handlers.poke_handler.get_user", new_callable=AsyncMock, return_value={"settings": {}}), \
              patch("handlers.poke_handler._is_user_typing", new_callable=AsyncMock, return_value=True) as mock_typing, \
              patch("handlers.poke_handler._generate_reply_for_chat", new_callable=AsyncMock) as mock_gen:

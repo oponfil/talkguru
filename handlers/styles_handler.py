@@ -8,7 +8,7 @@ from telegram.ext import ContextTypes
 from clients import pyrogram_client
 from config import (
     AUTO_REPLY_OPTIONS,
-    CHAT_STYLES_DIALOGS_LIMIT,
+    ACTIVE_CHATS_LIMIT,
     DEBUG_PRINT,
     DEFAULT_STYLE,
     STYLE_OPTIONS,
@@ -112,7 +112,7 @@ def _get_relevant_dialogs(
     dialogs = [d for d in all_dialogs if d["chat_id"] in relevant_ids]
     # Чаты с per-chat auto-reply/ignore — сверху
     dialogs.sort(key=lambda d: d["chat_id"] not in ar_ids)
-    return dialogs[:CHAT_STYLES_DIALOGS_LIMIT]
+    return dialogs[:ACTIVE_CHATS_LIMIT]
 
 
 @serialize_user_updates
@@ -137,7 +137,7 @@ async def on_chats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     # Получаем широкий список диалогов для фильтрации
     all_dialogs = await pyrogram_client.get_dialog_info(
-        u.id, limit=CHAT_STYLES_DIALOGS_LIMIT * 10,
+        u.id, limit=ACTIVE_CHATS_LIMIT * 10,
     )
 
     dialogs = _get_relevant_dialogs(all_dialogs, user_settings, u.id)
@@ -167,7 +167,7 @@ async def _refresh_keyboard(
     dialogs = context.user_data.get("chats_dialogs") or []
     if not dialogs:
         all_dialogs = await pyrogram_client.get_dialog_info(
-            u.id, limit=CHAT_STYLES_DIALOGS_LIMIT * 10,
+            u.id, limit=ACTIVE_CHATS_LIMIT * 10,
         )
         dialogs = _get_relevant_dialogs(all_dialogs, updated_settings, u.id)
     else:

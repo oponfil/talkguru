@@ -357,9 +357,10 @@ async def on_connect_qr_callback(update: Update, context: ContextTypes.DEFAULT_T
         await query.edit_message_text(msg)
         return
 
-    await _start_qr_flow(
-        u.id, u.language_code, context.bot, update.effective_chat.id,
-    )
+    async with keep_typing(context.bot, update.effective_chat.id):
+        await _start_qr_flow(
+            u.id, u.language_code, context.bot, update.effective_chat.id,
+        )
 
 
 # ====== Phone flow text handlers ======
@@ -533,14 +534,15 @@ async def on_confirm_phone_callback(update: Update, context: ContextTypes.DEFAUL
 
             if "PhoneNumberInvalid" in error_name:
                 # Возвращаем в awaiting_phone — пользователь может ввести повторно
+                msg = await get_system_message(language_code, "connect_phone_invalid")
+                sent_err = await context.bot.send_message(chat_id=chat_id, text=msg)
+                sensitive_msg_ids.append(sent_err.message_id)
                 _put_pending_phone(u.id, {
                     "state": "awaiting_phone",
                     "language_code": language_code,
                     "chat_id": chat_id,
-                    "sensitive_msg_ids": pending.get("sensitive_msg_ids") or [],
+                    "sensitive_msg_ids": sensitive_msg_ids,
                 })
-                msg = await get_system_message(language_code, "connect_phone_invalid")
-                await context.bot.send_message(chat_id=chat_id, text=msg)
                 if client is not None:
                     await _safe_disconnect_temp_client(client, u.id)
                 return

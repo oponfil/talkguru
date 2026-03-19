@@ -133,7 +133,8 @@ SYSTEM_MESSAGES = {
     "prompt_clear": "🗑 Clear",
 
     # — Poke (/poke) —
-    "poke_scanning": "🔍 Started checking active chats…",
+    "poke_result": "✅ Checked {checked} chats — generating {drafts} drafts.",
+    "poke_result_none": "✅ Checked {checked} chats — no drafts needed right now.",
     "menu_poke": "Poke active chats",
 }
 

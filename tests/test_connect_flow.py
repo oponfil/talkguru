@@ -266,7 +266,10 @@ class TestOnConfirmPhoneCallback:
             await on_confirm_phone_callback(update, context)
 
         assert _pending_phone[user_id]["state"] == "awaiting_phone"
-        assert _pending_phone[user_id]["sensitive_msg_ids"] == [42]
+        # sensitive_msg_ids: оригинальный (42) + ошибка PhoneNumberInvalid
+        ids = _pending_phone[user_id]["sensitive_msg_ids"]
+        assert 42 in ids
+        assert len(ids) == 2
 
     @pytest.mark.asyncio
     async def test_floodwait_deletes_sensitive_messages(self):
