@@ -21,7 +21,7 @@ from handlers.pyrogram_handlers import (
     handle_2fa_password,
     handle_connect_text,
     on_connect_qr_callback,
-    on_disconnect,
+    on_disconnect, on_disconnect_confirm_callback, on_disconnect_cancel_callback,
     on_connect,
     on_pyrogram_draft,
     on_pyrogram_message,
@@ -69,94 +69,161 @@ def cleanup_handler_state():
 
 
 class TestOnDisconnect:
-    """Тесты для on_disconnect()."""
+    """Тесты для on_disconnect() и disconnect callbacks."""
 
     @pytest.mark.asyncio
-    async def test_not_connected(self, mock_update, mock_context):
-        """Не подключён → сообщение 'not connected'."""
-        with patch("handlers.pyrogram_handlers.pyrogram_client") as mock_pc, \
-             patch("handlers.pyrogram_handlers.ensure_effective_user", new_callable=AsyncMock, return_value={}), \
-             patch("handlers.pyrogram_handlers.clear_session", new_callable=AsyncMock, return_value=True) as mock_clear:
-            mock_pc.is_active.return_value = False
-
-            await on_disconnect(mock_update, mock_context)
-
-        mock_update.message.reply_text.assert_called_once()
-        mock_pc.stop_listening.assert_not_called()
-        mock_clear.assert_called_once_with(mock_update.effective_user.id)
-
-    @pytest.mark.asyncio
-    async def test_disconnects(self, mock_update, mock_context):
-        """Подключён → отключает и очищает сессию."""
-        with patch("handlers.pyrogram_handlers.pyrogram_client") as mock_pc, \
-             patch("handlers.pyrogram_handlers.ensure_effective_user", new_callable=AsyncMock, return_value={}), \
-             patch("handlers.pyrogram_handlers.clear_session", new_callable=AsyncMock, return_value=True) as mock_clear:
-            mock_pc.is_active.return_value = True
-            mock_pc.stop_listening = AsyncMock(return_value=True)
-
-            await on_disconnect(mock_update, mock_context)
-
-        mock_pc.stop_listening.assert_called_once_with(mock_update.effective_user.id)
-        mock_clear.assert_called_once_with(mock_update.effective_user.id)
-
-    @pytest.mark.asyncio
-    async def test_disconnect_clears_saved_session_even_without_active_listener(self, mock_update, mock_context):
-        with patch("handlers.pyrogram_handlers.pyrogram_client") as mock_pc, \
-             patch("handlers.pyrogram_handlers.ensure_effective_user", new_callable=AsyncMock, return_value={}), \
-             patch("handlers.pyrogram_handlers.clear_session", new_callable=AsyncMock, return_value=True) as mock_clear:
-            mock_pc.is_active.return_value = False
-
-            await on_disconnect(mock_update, mock_context)
-
-        mock_pc.stop_listening.assert_not_called()
-        mock_clear.assert_called_once_with(mock_update.effective_user.id)
-
-    @pytest.mark.asyncio
-    async def test_disconnect_returns_error_when_stop_fails(self, mock_update, mock_context):
+    async def test_not_connected_shows_status(self, mock_update, mock_context):
+        """Не подключён → сообщение 'not connected', без подтверждения."""
         with patch("handlers.pyrogram_handlers.pyrogram_client") as mock_pc, \
              patch("handlers.pyrogram_handlers.ensure_effective_user", new_callable=AsyncMock, return_value={}), \
              patch("handlers.pyrogram_handlers.clear_session", new_callable=AsyncMock, return_value=True) as mock_clear, \
-             patch("handlers.pyrogram_handlers.get_system_message", new_callable=AsyncMock, return_value="Disconnect failed"):
-            mock_pc.is_active.return_value = True
-            mock_pc.stop_listening = AsyncMock(return_value=False)
+             patch("handlers.pyrogram_handlers.get_system_message", new_callable=AsyncMock, return_value="Not connected"):
+            mock_pc.is_active.return_value = False
 
             await on_disconnect(mock_update, mock_context)
 
-        mock_clear.assert_not_called()
-        mock_update.message.reply_text.assert_called_once_with("Disconnect failed")
+        mock_update.message.reply_text.assert_called_once_with("Not connected")
+        mock_clear.assert_called_once_with(mock_update.effective_user.id)
 
     @pytest.mark.asyncio
-    async def test_disconnect_returns_error_when_clear_session_fails(self, mock_update, mock_context):
+    async def test_not_connected_returns_error_when_clear_session_fails(self, mock_update, mock_context):
+        """Не подключён + clear_session fails → сообщение об ошибке."""
         with patch("handlers.pyrogram_handlers.pyrogram_client") as mock_pc, \
              patch("handlers.pyrogram_handlers.ensure_effective_user", new_callable=AsyncMock, return_value={}), \
-             patch("handlers.pyrogram_handlers.clear_session", new_callable=AsyncMock, return_value=False), \
+             patch("handlers.pyrogram_handlers.clear_session", new_callable=AsyncMock, return_value=False) as mock_clear, \
              patch("handlers.pyrogram_handlers.get_system_message", new_callable=AsyncMock, return_value="Disconnect failed"):
             mock_pc.is_active.return_value = False
 
             await on_disconnect(mock_update, mock_context)
 
         mock_update.message.reply_text.assert_called_once_with("Disconnect failed")
+        mock_clear.assert_called_once_with(mock_update.effective_user.id)
 
     @pytest.mark.asyncio
-    async def test_disconnect_cancels_pending_2fa(self, mock_update, mock_context):
-        temp_client = AsyncMock()
+    async def test_connected_shows_confirmation(self, mock_update, mock_context):
+        """Подключён → показывает предупреждение с кнопками."""
+        with patch("handlers.pyrogram_handlers.pyrogram_client") as mock_pc, \
+             patch("handlers.pyrogram_handlers.ensure_effective_user", new_callable=AsyncMock, return_value={}), \
+             patch("handlers.pyrogram_handlers.get_system_message", new_callable=AsyncMock, return_value="Are you sure?"):
+            mock_pc.is_active.return_value = True
+
+            await on_disconnect(mock_update, mock_context)
+
+        # Показано предупреждение с reply_markup (кнопки)
+        mock_update.message.reply_text.assert_called_once()
+        call_kwargs = mock_update.message.reply_text.call_args
+        assert call_kwargs[1].get("reply_markup") is not None or \
+               (len(call_kwargs[0]) > 0 and hasattr(call_kwargs, "kwargs") and "reply_markup" in call_kwargs.kwargs)
+
+    @pytest.mark.asyncio
+    async def test_pending_2fa_shows_confirmation(self, mock_update, mock_context):
+        """Pending 2FA → показывает подтверждение вместо мгновенного отключения."""
         _pending_2fa[mock_update.effective_user.id] = {
-            "client": temp_client,
+            "client": AsyncMock(),
             "language_code": "en",
             "chat_id": mock_update.effective_chat.id,
         }
 
         with patch("handlers.pyrogram_handlers.pyrogram_client") as mock_pc, \
              patch("handlers.pyrogram_handlers.ensure_effective_user", new_callable=AsyncMock, return_value={}), \
-             patch("handlers.pyrogram_handlers.clear_session", new_callable=AsyncMock, return_value=True), \
-             patch("handlers.pyrogram_handlers.get_system_message", new_callable=AsyncMock, return_value="Disconnected"):
+             patch("handlers.pyrogram_handlers.get_system_message", new_callable=AsyncMock, return_value="Are you sure?"):
             mock_pc.is_active.return_value = False
 
             await on_disconnect(mock_update, mock_context)
 
+        # Показано предупреждение, pending_2fa НЕ отменён (ждём подтверждения)
+        mock_update.message.reply_text.assert_called_once()
+        assert mock_update.effective_user.id in _pending_2fa
+
+
+class TestOnDisconnectCallbacks:
+    """Тесты для on_disconnect_confirm_callback и on_disconnect_cancel_callback."""
+
+    def _make_callback_update(self, user_id=12345, chat_id=12345):
+        """Создаёт mock update для callback query."""
+        update = AsyncMock()
+        update.effective_user.id = user_id
+        update.effective_user.language_code = "en"
+        update.callback_query.answer = AsyncMock()
+        update.callback_query.edit_message_reply_markup = AsyncMock()
+        update.callback_query.message.chat_id = chat_id
+        return update
+
+    @pytest.mark.asyncio
+    async def test_confirm_disconnects_and_clears_session(self, mock_context):
+        """Подтверждение → отключает и очищает сессию."""
+        update = self._make_callback_update()
+        with patch("handlers.pyrogram_handlers.pyrogram_client") as mock_pc, \
+             patch("handlers.pyrogram_handlers.clear_session", new_callable=AsyncMock, return_value=True) as mock_clear, \
+             patch("handlers.pyrogram_handlers.get_system_message", new_callable=AsyncMock, return_value="Disconnected"), \
+             patch("handlers.pyrogram_handlers.update_user_menu", new_callable=AsyncMock):
+            mock_pc.is_active.return_value = True
+            mock_pc.stop_listening = AsyncMock(return_value=True)
+
+            await on_disconnect_confirm_callback(update, mock_context)
+
+        mock_pc.stop_listening.assert_called_once_with(update.effective_user.id)
+        mock_clear.assert_called_once_with(update.effective_user.id)
+        mock_context.bot.send_message.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_confirm_error_when_stop_fails(self, mock_context):
+        """Подтверждение + stop_listening fails → ошибка."""
+        update = self._make_callback_update()
+        with patch("handlers.pyrogram_handlers.pyrogram_client") as mock_pc, \
+             patch("handlers.pyrogram_handlers.clear_session", new_callable=AsyncMock, return_value=True) as mock_clear, \
+             patch("handlers.pyrogram_handlers.get_system_message", new_callable=AsyncMock, return_value="Error"):
+            mock_pc.is_active.return_value = True
+            mock_pc.stop_listening = AsyncMock(return_value=False)
+
+            await on_disconnect_confirm_callback(update, mock_context)
+
+        mock_clear.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_confirm_error_when_clear_session_fails(self, mock_context):
+        """Подтверждение + clear_session fails → ошибка."""
+        update = self._make_callback_update()
+        with patch("handlers.pyrogram_handlers.pyrogram_client") as mock_pc, \
+             patch("handlers.pyrogram_handlers.clear_session", new_callable=AsyncMock, return_value=False), \
+             patch("handlers.pyrogram_handlers.get_system_message", new_callable=AsyncMock, return_value="Error"):
+            mock_pc.is_active.return_value = False
+
+            await on_disconnect_confirm_callback(update, mock_context)
+
+        mock_context.bot.send_message.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_confirm_cancels_pending_2fa(self, mock_context):
+        """Подтверждение отменяет pending 2FA."""
+        update = self._make_callback_update()
+        user_id = update.effective_user.id
+        temp_client = AsyncMock()
+        _pending_2fa[user_id] = {
+            "client": temp_client,
+            "language_code": "en",
+            "chat_id": update.callback_query.message.chat_id,
+        }
+
+        with patch("handlers.pyrogram_handlers.pyrogram_client") as mock_pc, \
+             patch("handlers.pyrogram_handlers.clear_session", new_callable=AsyncMock, return_value=True), \
+             patch("handlers.pyrogram_handlers.get_system_message", new_callable=AsyncMock, return_value="Disconnected"), \
+             patch("handlers.pyrogram_handlers.update_user_menu", new_callable=AsyncMock):
+            mock_pc.is_active.return_value = False
+
+            await on_disconnect_confirm_callback(update, mock_context)
+
         temp_client.disconnect.assert_called_once()
-        assert mock_update.effective_user.id not in _pending_2fa
-        mock_update.message.reply_text.assert_called_once_with("Disconnected")
+        assert user_id not in _pending_2fa
+
+    @pytest.mark.asyncio
+    async def test_cancel_removes_buttons(self, mock_context):
+        """Отмена → убирает кнопки."""
+        update = self._make_callback_update()
+        await on_disconnect_cancel_callback(update, mock_context)
+
+        update.callback_query.answer.assert_called_once()
+        update.callback_query.edit_message_reply_markup.assert_called_once_with(reply_markup=None)
 
 
 class TestOnStatus:
@@ -1393,8 +1460,8 @@ class TestConnectPhoneFlow:
         mock_qr.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_disconnect_cancels_pending_phone(self, mock_update, mock_context):
-        """`/disconnect` отменяет активный phone-flow."""
+    async def test_disconnect_shows_confirmation_with_pending_phone(self, mock_update, mock_context):
+        """`/disconnect` при pending phone-flow → показывает подтверждение."""
         user_id = mock_update.effective_user.id
         temp_client = AsyncMock()
         _pending_phone[user_id] = {
@@ -1406,15 +1473,14 @@ class TestConnectPhoneFlow:
 
         with patch("handlers.pyrogram_handlers.pyrogram_client") as mock_pc, \
              patch("handlers.pyrogram_handlers.ensure_effective_user", new_callable=AsyncMock, return_value={}), \
-             patch("handlers.pyrogram_handlers.clear_session", new_callable=AsyncMock, return_value=True), \
-             patch("handlers.pyrogram_handlers.get_system_message", new_callable=AsyncMock, return_value="Disconnected"):
+             patch("handlers.pyrogram_handlers.get_system_message", new_callable=AsyncMock, return_value="Are you sure?"):
             mock_pc.is_active.return_value = False
 
             await on_disconnect(mock_update, mock_context)
 
-        temp_client.disconnect.assert_called_once()
-        assert user_id not in _pending_phone
-        mock_update.message.reply_text.assert_called_once_with("Disconnected")
+        # Показано подтверждение, pending_phone НЕ отменён (ждём кнопки)
+        mock_update.message.reply_text.assert_called_once()
+        assert user_id in _pending_phone
 
     @pytest.mark.asyncio
     async def test_connect_rejects_when_phone_flow_running(self, mock_update, mock_context):

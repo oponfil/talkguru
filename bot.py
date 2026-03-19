@@ -27,6 +27,7 @@ from handlers.bot_handlers import on_start, on_start_connect_callback, on_text  
 from handlers.pyrogram_handlers import (  # noqa: E402
     on_disconnect, on_connect, on_status, handle_connect_text,
     on_connect_qr_callback, on_confirm_phone_callback, on_cancel_phone_callback, on_connect_cancel_callback,
+    on_disconnect_confirm_callback, on_disconnect_cancel_callback,
     on_pyrogram_message, on_pyrogram_draft,
     poll_missed_messages,
 )
@@ -78,6 +79,8 @@ def main() -> None:
     app.add_handler(CallbackQueryHandler(on_chat_prompt_clear_callback, pattern=r"^chatprompt_clear:"))
     app.add_handler(CommandHandler("status", on_status, filters=PRIVATE_ONLY_FILTER))
     app.add_handler(CommandHandler("disconnect", on_disconnect, filters=PRIVATE_ONLY_FILTER))
+    app.add_handler(CallbackQueryHandler(on_disconnect_confirm_callback, pattern=r"^disconnect:confirm$"))
+    app.add_handler(CallbackQueryHandler(on_disconnect_cancel_callback, pattern=r"^disconnect:cancel$"))
     app.add_handler(CallbackQueryHandler(on_connect_qr_callback, pattern=r"^connect:qr$"))
     app.add_handler(CallbackQueryHandler(on_confirm_phone_callback, pattern=r"^connect:confirm_phone$"))
     app.add_handler(CallbackQueryHandler(on_cancel_phone_callback, pattern=r"^connect:cancel_phone$"))

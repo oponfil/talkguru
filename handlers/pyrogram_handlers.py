@@ -55,7 +55,7 @@ from utils.telegram_user import ensure_effective_user, upsert_effective_user
 @serialize_user_updates
 @typing_action
 async def on_disconnect(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Обработчик команды /disconnect — отключает аккаунт."""
+    """Обработчик команды /disconnect — показывает предупреждение с подтверждением."""
     u = update.effective_user
 
     try:
@@ -68,37 +68,82 @@ async def on_disconnect(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     asyncio.create_task(update_last_msg_at(u.id))
 
     is_active = pyrogram_client.is_active(u.id)
-    had_pending_2fa = await cancel_pending_2fa(u.id)
-    # bot передаём для удаления чувствительных сообщений при cancel
-    had_pending_phone = await cancel_pending_phone(u.id, bot=context.bot)
+    has_pending_2fa = u.id in _pending_2fa
+    has_pending_phone = u.id in _pending_phone
 
     if DEBUG_PRINT:
         print(f"{get_timestamp()} [BOT] /disconnect from user {u.id} (@{u.username}, lang={u.language_code})")
+
+    # Если нет активного подключения и нет pending-процессов — нечего отключать
+    if not is_active and not has_pending_2fa and not has_pending_phone:
+        # Всегда чистим stale-сессию в БД (идемпотентность)
+        cleared = await clear_session(u.id)
+        message_key = "status_disconnected" if cleared else "disconnect_error"
+        msg = await get_system_message(u.language_code, message_key)
+        await update.message.reply_text(msg)
+        return
+
+    # Показываем предупреждение с кнопками подтверждения
+    msg = await get_system_message(u.language_code, "disconnect_confirm")
+    confirm_label = await get_system_message(u.language_code, "disconnect_btn_confirm")
+    cancel_label = await get_system_message(u.language_code, "disconnect_btn_cancel")
+    keyboard = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton(confirm_label, callback_data="disconnect:confirm"),
+            InlineKeyboardButton(cancel_label, callback_data="disconnect:cancel"),
+        ],
+    ])
+    await update.message.reply_text(msg, reply_markup=keyboard)
+
+
+@serialize_user_updates
+async def on_disconnect_confirm_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Callback кнопки 'Да, отключить' — выполняет отключение."""
+    query = update.callback_query
+    await query.answer()
+    u = update.effective_user
+
+    # Убираем кнопки
+    try:
+        await query.edit_message_reply_markup(reply_markup=None)
+    except Exception:
+        pass
+
+    # Отменяем pending-процессы
+    await cancel_pending_2fa(u.id)
+    await cancel_pending_phone(u.id, bot=context.bot)
+
+    is_active = pyrogram_client.is_active(u.id)
 
     if is_active:
         stopped = await pyrogram_client.stop_listening(u.id)
         if not stopped:
             msg = await get_system_message(u.language_code, "disconnect_error")
-            await update.message.reply_text(msg)
+            await context.bot.send_message(chat_id=query.message.chat_id, text=msg)
             return
 
-    # Всегда пробуем очистить сессию в БД:
-    # это делает /disconnect идемпотентным и устраняет stale-сессии после сбоев.
     cleared = await clear_session(u.id)
     if not cleared:
         msg = await get_system_message(u.language_code, "disconnect_error")
-        await update.message.reply_text(msg)
-        return
-
-    if not is_active and not had_pending_2fa and not had_pending_phone:
-        msg = await get_system_message(u.language_code, "status_disconnected")
-        await update.message.reply_text(msg)
+        await context.bot.send_message(chat_id=query.message.chat_id, text=msg)
         return
 
     msg = await get_system_message(u.language_code, "disconnect_success")
-    await update.message.reply_text(msg)
+    await context.bot.send_message(chat_id=query.message.chat_id, text=msg)
     await update_user_menu(context.bot, u.id, u.language_code, is_connected=False)
     print(f"{get_timestamp()} [BOT] User {u.id} disconnected")
+
+
+@serialize_user_updates
+async def on_disconnect_cancel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Callback кнопки 'Отмена' — убираем кнопки."""
+    query = update.callback_query
+    await query.answer()
+
+    try:
+        await query.edit_message_reply_markup(reply_markup=None)
+    except Exception:
+        pass
 
 
 # ====== /status ======
@@ -266,11 +311,11 @@ async def on_connect(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     chat_id = update.effective_chat.id
 
     # reply helper: работает и при вызове через команду, и через callback
-    async def reply(text: str, **kw: object) -> None:
+    async def reply(text: str, **kw: object) -> object:
         if update.message is not None:
-            await update.message.reply_text(text, **kw)
+            return await update.message.reply_text(text, **kw)
         else:
-            await context.bot.send_message(chat_id=chat_id, text=text, **kw)
+            return await context.bot.send_message(chat_id=chat_id, text=text, **kw)
 
     asyncio.create_task(update_last_msg_at(u.id))
 
@@ -318,7 +363,12 @@ async def on_connect(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton(qr_label, callback_data="connect:qr")]
         ])
-        await reply(msg, reply_markup=keyboard)
+        sent = await reply(msg, reply_markup=keyboard)
+        # Запоминаем ID приглашения для удаления при завершении flow
+        if sent and hasattr(sent, "message_id"):
+            pending = _pending_phone.get(u.id)
+            if pending is not None:
+                pending.setdefault("sensitive_msg_ids", []).append(sent.message_id)
 
     except Exception as e:
         print(f"{get_timestamp()} [BOT] ERROR connect for user {u.id}: {e}")
@@ -489,7 +539,8 @@ async def _handle_phone_number(
         })
         # Невалидный номер — просим ввести заново, остаёмся в awaiting_phone
         msg = await get_system_message(language_code, "connect_phone_invalid")
-        await context.bot.send_message(chat_id=chat_id, text=msg)
+        sent = await context.bot.send_message(chat_id=chat_id, text=msg)
+        sensitive_msg_ids.append(sent.message_id)
         raise ApplicationHandlerStop
 
     # Собираем ID сообщения для отложенного удаления
@@ -726,7 +777,8 @@ async def _handle_phone_code(
             # 2FA требуется — переводим в awaiting_2fa
             _put_pending_phone(u.id, {**_pending_phone[u.id], "state": "awaiting_2fa"})
             msg = await get_system_message(language_code, "connect_2fa_prompt")
-            await context.bot.send_message(chat_id=chat_id, text=msg)
+            sent = await context.bot.send_message(chat_id=chat_id, text=msg)
+            _pending_phone[u.id].setdefault("sensitive_msg_ids", []).append(sent.message_id)
             if DEBUG_PRINT:
                 print(f"{get_timestamp()} [CONNECT_PHONE] 2FA required for user {u.id}")
             raise ApplicationHandlerStop
@@ -736,17 +788,21 @@ async def _handle_phone_code(
             print(f"{get_timestamp()} [CONNECT_PHONE] WARNING: invalid code for user {u.id}")
             _put_pending_phone(u.id, pending)
             msg = await get_system_message(language_code, "connect_code_invalid")
-            await context.bot.send_message(chat_id=chat_id, text=msg)
+            sent = await context.bot.send_message(chat_id=chat_id, text=msg)
+            pending.setdefault("sensitive_msg_ids", []).append(sent.message_id)
             if raw_code.isdigit():
                 hint = await get_system_message(language_code, "connect_code_no_separator")
-                await context.bot.send_message(chat_id=chat_id, text=hint)
+                sent_hint = await context.bot.send_message(chat_id=chat_id, text=hint)
+                pending.setdefault("sensitive_msg_ids", []).append(sent_hint.message_id)
             raise ApplicationHandlerStop
 
         if "PhoneCodeExpired" in error_name:
             print(f"{get_timestamp()} [CONNECT_PHONE] WARNING: code expired for user {u.id}")
+            # Хинт про разделители трекаем для удаления; expired/blocked оставляем (ссылка /connect)
             if raw_code.isdigit():
                 hint = await get_system_message(language_code, "connect_code_no_separator")
-                await context.bot.send_message(chat_id=chat_id, text=hint)
+                sent_hint = await context.bot.send_message(chat_id=chat_id, text=hint)
+                pending.setdefault("sensitive_msg_ids", []).append(sent_hint.message_id)
                 blocked = await get_system_message(language_code, "connect_code_blocked")
                 await context.bot.send_message(chat_id=chat_id, text=blocked)
             else:
@@ -758,7 +814,8 @@ async def _handle_phone_code(
         print(f"{get_timestamp()} [CONNECT_PHONE] ERROR sign_in for user {u.id}: {e}")
         traceback.print_exc()
         msg = await get_system_message(language_code, "connect_error")
-        await context.bot.send_message(chat_id=chat_id, text=msg)
+        sent_err = await context.bot.send_message(chat_id=chat_id, text=msg)
+        pending.setdefault("sensitive_msg_ids", []).append(sent_err.message_id)
         await cancel_pending_phone(u.id, bot=context.bot)
 
     raise ApplicationHandlerStop
@@ -803,14 +860,16 @@ async def _handle_phone_2fa(
             print(f"{get_timestamp()} [CONNECT_PHONE] Wrong 2FA password for user {u.id}")
             _put_pending_phone(u.id, pending)
             msg = await get_system_message(language_code, "connect_2fa_wrong_password")
-            await context.bot.send_message(chat_id=chat_id, text=msg)
+            sent = await context.bot.send_message(chat_id=chat_id, text=msg)
+            pending.setdefault("sensitive_msg_ids", []).append(sent.message_id)
             # Остаёмся в awaiting_2fa
             raise ApplicationHandlerStop
 
         print(f"{get_timestamp()} [CONNECT_PHONE] 2FA error for user {u.id}: {e}")
         traceback.print_exc()
         msg = await get_system_message(language_code, "connect_2fa_error")
-        await context.bot.send_message(chat_id=chat_id, text=msg)
+        sent_err = await context.bot.send_message(chat_id=chat_id, text=msg)
+        pending.setdefault("sensitive_msg_ids", []).append(sent_err.message_id)
         await cancel_pending_phone(u.id, bot=context.bot)
 
     raise ApplicationHandlerStop
