@@ -241,6 +241,7 @@ class X402GateClient:
             response.raise_for_status()
             data = response.json()
             self._prepaid_balance = float(data.get("balance", 0))
+            dash_stats.update_balance(self._prepaid_balance)
 
         # Получаем баланс USDC на кошельке асинхронно, чтобы не блокировать hot path (best-effort)
         async def _log_wallet_balance():

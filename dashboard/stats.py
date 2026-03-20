@@ -40,6 +40,7 @@ class _GlobalStats:
     drafts_generated: int = 0
     draft_styles: dict[str, int] = field(default_factory=dict)
     auto_replies_sent: int = 0
+    bot_replies: int = 0
 
     # Голосовые
     voice_transcriptions: int = 0
@@ -150,6 +151,11 @@ def record_auto_reply() -> None:
     _stats.auto_replies_sent += 1
 
 
+def record_bot_reply() -> None:
+    """Записывает ответ бота в чате с пользователем."""
+    _stats.bot_replies += 1
+
+
 def record_voice_transcription() -> None:
     """Записывает транскрипцию голосового сообщения."""
     _stats.voice_transcriptions += 1
@@ -240,6 +246,7 @@ def get_stats() -> dict[str, Any]:
         "drafts_generated": _stats.drafts_generated,
         "draft_styles": dict(_stats.draft_styles),
         "auto_replies_sent": _stats.auto_replies_sent,
+        "bot_replies": _stats.bot_replies,
         # Голосовые
         "voice_transcriptions": _stats.voice_transcriptions,
         # Команды

@@ -349,10 +349,11 @@
 
     <!-- Reply Styles & Activity -->
     <div class="summary" id="styles-summary">
+        <div class="summary-item">Bot: <strong id="sum-bot-replies">0</strong></div>
         <div class="summary-item">Drafts: <strong id="sum-drafts">0</strong></div>
         <div class="summary-item">Auto-replies: <strong id="sum-autoreplies">0</strong></div>
         <div class="summary-item">Voice: <strong id="sum-voice">0</strong></div>
-        <span id="style-items"><!-- Injected by JS --></span>
+        <div id="style-items" style="display:contents"><!-- Injected by JS --></div>
     </div>
 
     <!-- Models -->
@@ -478,8 +479,8 @@
                 const d = details[m];
                 const short = m.split('/').pop();
                 const avgLat = d.count > 0 ? (d.latency / d.count).toFixed(2) : '0';
-                const totalCost = d.cost ? '$' + d.cost.toFixed(4) : '—';
-                const avgCostModel = d.count > 0 && d.cost ? '$' + (d.cost / d.count).toFixed(4) : '—';
+                const totalCost = d.cost != null ? '$' + d.cost.toFixed(4) : '—';
+                const avgCostModel = d.count > 0 && d.cost != null ? '$' + (d.cost / d.count).toFixed(4) : '—';
                 html += `<div class="card">
                     <div class="card-header">
                         <span class="card-name">${escHtml(short)}</span>
@@ -584,6 +585,7 @@
                 document.getElementById('sum-drafts').textContent = stats.drafts_generated;
                 document.getElementById('sum-autoreplies').textContent = stats.auto_replies_sent;
                 document.getElementById('sum-voice').textContent = stats.voice_transcriptions;
+                document.getElementById('sum-bot-replies').textContent = stats.bot_replies;
                 document.getElementById('sum-latency').textContent = stats.avg_latency_s + 's';
                 document.getElementById('sum-tokens-in').textContent = formatNumber(stats.total_tokens_in);
                 document.getElementById('sum-tokens-out').textContent = formatNumber(stats.total_tokens_out);

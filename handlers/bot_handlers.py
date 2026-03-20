@@ -207,6 +207,7 @@ async def _process_text(
 
         # Отправляем ответ
         await m.reply_text(response_text)
+        dash_stats.record_bot_reply()
 
         if DEBUG_PRINT:
             print(f"{get_timestamp()} [BOT] Response sent to user {u.id}")
