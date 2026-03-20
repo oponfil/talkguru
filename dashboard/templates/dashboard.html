@@ -347,9 +347,12 @@
         </div>
     </div>
 
-    <!-- Reply Styles -->
+    <!-- Reply Styles & Activity -->
     <div class="summary" id="styles-summary">
-        <!-- Injected by JS -->
+        <div class="summary-item">Drafts: <strong id="sum-drafts">0</strong></div>
+        <div class="summary-item">Auto-replies: <strong id="sum-autoreplies">0</strong></div>
+        <div class="summary-item">Voice: <strong id="sum-voice">0</strong></div>
+        <span id="style-items"><!-- Injected by JS --></span>
     </div>
 
     <!-- Models -->
@@ -365,9 +368,6 @@
 
     <!-- LLM Summary -->
     <div class="summary" id="llm-summary">
-        <div class="summary-item">Drafts: <strong id="sum-drafts">0</strong></div>
-        <div class="summary-item">Auto-replies: <strong id="sum-autoreplies">0</strong></div>
-        <div class="summary-item">Voice Transcriptions: <strong id="sum-voice">0</strong></div>
         <div class="summary-item">Avg latency: <strong id="sum-latency">0s</strong></div>
         <div class="summary-item">Avg cost/req: <strong id="sum-avg-cost">—</strong></div>
         <div class="summary-item">Tokens in: <strong id="sum-tokens-in">0</strong></div>
@@ -401,6 +401,7 @@
         <a href="/api/logs">Logs JSON</a>
     </div>
 
+    <script id="style-emoji-data" type="application/json">{{ style_emoji_pairs | tojson }}</script>
     <script>
         let _lastLogs = [];
         let _logFilter = 'ALL';
@@ -477,6 +478,8 @@
                 const d = details[m];
                 const short = m.split('/').pop();
                 const avgLat = d.count > 0 ? (d.latency / d.count).toFixed(2) : '0';
+                const totalCost = d.cost ? '$' + d.cost.toFixed(4) : '—';
+                const avgCostModel = d.count > 0 && d.cost ? '$' + (d.cost / d.count).toFixed(4) : '—';
                 html += `<div class="card">
                     <div class="card-header">
                         <span class="card-name">${escHtml(short)}</span>
@@ -487,6 +490,8 @@
                         <div class="metric">Tokens out<strong>${formatNumber(d.tokens_out)}</strong></div>
                         <div class="metric">Reasoning<strong>${formatNumber(d.reasoning)}</strong></div>
                         <div class="metric">Avg latency<strong>${avgLat}s</strong></div>
+                        <div class="metric">Total cost<strong>${totalCost}</strong></div>
+                        <div class="metric">Avg cost/req<strong>${avgCostModel}</strong></div>
                     </div>
                 </div>`;
             }
@@ -494,10 +499,10 @@
             grid.innerHTML = html;
 
             // Commands bar
+            const allCommands = ['/start', '/connect', '/disconnect', '/status', '/settings', '/chats', '/poke'];
             const cmds = stats.commands || {};
-            const cmdNames = Object.keys(cmds).sort((a, b) => cmds[b] - cmds[a]);
             const cmdBar = document.getElementById('commands-summary');
-            cmdBar.innerHTML = cmdNames.map(c => `<div class="summary-item">${escHtml(c)}: <strong>${cmds[c]}</strong></div>`).join('');
+            cmdBar.innerHTML = allCommands.map(c => `<div class="summary-item">${escHtml(c)}: <strong>${cmds[c] || 0}</strong></div>`).join('');
         }
 
         function copyLogs() {
@@ -568,13 +573,10 @@
                 }
 
                 // Reply styles bar
-                const styleEmojis = {{ style_to_emoji | tojson }};
+                const styleEmojiPairs = JSON.parse(document.getElementById('style-emoji-data').textContent);
                 const draftStyles = stats.draft_styles || {};
-                const styleBar = document.getElementById('styles-summary');
-                const styleNames = Object.keys(styleEmojis);
-                styleBar.innerHTML = styleNames.map(s => {
+                document.getElementById('style-items').innerHTML = styleEmojiPairs.map(([s, emoji]) => {
                     const count = draftStyles[s] || 0;
-                    const emoji = styleEmojis[s];
                     return `<div class="summary-item">${emoji} ${s}: <strong>${count}</strong></div>`;
                 }).join('');
 

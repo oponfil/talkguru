@@ -5,13 +5,15 @@
 
 from __future__ import annotations
 
+from typing import Callable
+
 import os
 import pathlib
 
 import jinja2
 from aiohttp import web
 
-from config import STYLE_TO_EMOJI
+from config import EMOJI_TO_STYLE
 from dashboard import stats
 from dashboard.auth import DASHBOARD_KEY, check_auth, set_auth_cookie
 from database.users import get_dashboard_user_stats
@@ -19,7 +21,7 @@ from database.users import get_dashboard_user_stats
 TEMPLATE_DIR = pathlib.Path(__file__).parent / "templates"
 
 
-def _require_auth(handler):  # type: ignore[type-arg]
+def _require_auth(handler: Callable) -> Callable:
     """Декоратор: возвращает 401 если запрос не аутентифицирован."""
 
     async def wrapper(request: web.Request) -> web.StreamResponse:
@@ -49,7 +51,8 @@ async def handle_dashboard(request: web.Request) -> web.Response:
         autoescape=False,
     )
     template = env.get_template("dashboard.html")
-    html = template.render(style_to_emoji=STYLE_TO_EMOJI)
+    style_emoji_pairs = [[style, emoji] for emoji, style in EMOJI_TO_STYLE.items()]
+    html = template.render(style_emoji_pairs=style_emoji_pairs)
 
     response = web.Response(text=html, content_type="text/html")
     set_auth_cookie(response)

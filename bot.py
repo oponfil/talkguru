@@ -57,7 +57,7 @@ from dashboard.server import start_dashboard_server  # noqa: E402
 _original_print = builtins.print
 
 
-def _dashboard_print(*args, **kwargs):
+def _dashboard_print(*args, **kwargs) -> None:
     """Wrapper around print() that also feeds output to dashboard stats."""
     _original_print(*args, **kwargs)
     try:
@@ -66,9 +66,6 @@ def _dashboard_print(*args, **kwargs):
             dash_stats.capture_log(message)
     except Exception:
         pass  # Never break the bot due to dashboard
-
-
-builtins.print = _dashboard_print
 
 
 # ====== ОБРАБОТЧИК ОШИБОК ======
@@ -83,6 +80,9 @@ async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 def main() -> None:
     """Точка входа — запуск бота в polling-режиме."""
+    # Активируем перехват print() для дашборда (только при запуске, не при импорте)
+    builtins.print = _dashboard_print
+
     if not BOT_TOKEN:
         print("❌ BOT_TOKEN не задан! Установите его в .env")
         return

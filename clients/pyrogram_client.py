@@ -1,6 +1,7 @@
 # clients/pyrogram_client.py — Управление Pyrogram-сессиями пользователей
 
 import asyncio
+from typing import Any, Callable
 from collections import defaultdict
 from datetime import datetime, timezone
 
@@ -42,13 +43,13 @@ def _make_processed_message_key(chat_id: int | None, message_id: int | None) -> 
     return (chat_id, message_id)
 
 
-def set_message_callback(callback) -> None:
+def set_message_callback(callback: Callable | None) -> None:
     """Устанавливает callback для обработки входящих сообщений."""
     global _on_new_message_callback
     _on_new_message_callback = callback
 
 
-def set_draft_callback(callback) -> None:
+def set_draft_callback(callback: Callable | None) -> None:
     """Устанавливает callback для обработки черновиков."""
     global _on_draft_callback
     _on_draft_callback = callback
@@ -66,7 +67,7 @@ async def create_client(user_id: int, session_string: str) -> Client:
     return client
 
 
-def _pyrogram_task_exception_handler(loop, context):
+def _pyrogram_task_exception_handler(loop: asyncio.AbstractEventLoop, context: dict[str, Any]) -> None:
     """Обработчик исключений в asyncio-задачах Pyrogram.
 
     Pyrogram создаёт внутренние Task-и (handle_updates) которые могут
@@ -87,7 +88,7 @@ def _pyrogram_task_exception_handler(loop, context):
         loop.default_exception_handler(context)
 
 
-def _install_pyrogram_exception_handler(loop) -> None:
+def _install_pyrogram_exception_handler(loop: asyncio.AbstractEventLoop) -> None:
     """Устанавливает обёртку над loop exception handler один раз."""
     if (
         _loop_handler_state["loop"] is loop
@@ -100,7 +101,7 @@ def _install_pyrogram_exception_handler(loop) -> None:
     _loop_handler_state["loop"] = loop
 
 
-def _restore_pyrogram_exception_handler(loop) -> None:
+def _restore_pyrogram_exception_handler(loop: asyncio.AbstractEventLoop) -> None:
     """Восстанавливает предыдущий loop exception handler."""
     if _loop_handler_state["loop"] is not loop:
         return

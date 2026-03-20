@@ -1,3 +1,5 @@
+# utils/utils.py — Утилиты общего назначения (форматирование, декораторы, стили)
+
 import asyncio
 from collections import defaultdict
 from contextlib import asynccontextmanager

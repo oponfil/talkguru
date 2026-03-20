@@ -91,6 +91,11 @@ def capture_log(message: str) -> None:
     })
 
 
+# Стоимость последнего запроса (вычисляется в update_balance,
+# привязывается к модели в record_llm_request).
+_last_request_cost: float = 0.0
+
+
 # ---------------------------------------------------------------------------
 # API записи метрик
 # ---------------------------------------------------------------------------
@@ -114,13 +119,18 @@ def record_llm_request(
     # Per-model детали
     md = _stats.model_details.get(model)
     if md is None:
-        md = {"count": 0, "tokens_in": 0, "tokens_out": 0, "reasoning": 0, "latency": 0.0}
+        md = {"count": 0, "tokens_in": 0, "tokens_out": 0, "reasoning": 0, "latency": 0.0, "cost": 0.0}
         _stats.model_details[model] = md
     md["count"] += 1
     md["tokens_in"] += tokens_in
     md["tokens_out"] += tokens_out
     md["reasoning"] += reasoning_tokens
     md["latency"] += latency_s
+
+    # Привязываем стоимость запроса (вычисленную в update_balance)
+    global _last_request_cost
+    md["cost"] += _last_request_cost
+    _last_request_cost = 0.0
 
 
 def record_llm_error() -> None:
@@ -154,13 +164,19 @@ def update_balance(balance: float) -> None:
     """Обновляет кэшированный prepaid-баланс x402gate.
 
     Если баланс вырос — фиксирует пополнение.
+    Если упал — сохраняет стоимость запроса для привязки к модели.
     """
+    global _last_request_cost
+    _last_request_cost = 0.0
     if _stats.initial_balance is None:
         _stats.initial_balance = balance
-    elif _stats.last_balance is not None and balance > _stats.last_balance:
-        topup_amount = balance - _stats.last_balance
-        _stats.topup_count += 1
-        _stats.topup_total += topup_amount
+    elif _stats.last_balance is not None:
+        if balance > _stats.last_balance:
+            topup_amount = balance - _stats.last_balance
+            _stats.topup_count += 1
+            _stats.topup_total += topup_amount
+        elif balance < _stats.last_balance:
+            _last_request_cost = _stats.last_balance - balance
     _stats.last_balance = balance
 
 
