@@ -25,6 +25,7 @@ from config import (
 from utils.utils import (
     get_timestamp,
     keep_typing,
+    serialize_user_update_by_id,
     serialize_user_updates,
     typing_action,
 )
@@ -53,6 +54,10 @@ _pending_2fa: dict[int, dict] = {}
 # Phone-flow: многошаговая state-machine (ввод номера → подтверждение → код → 2FA)
 # {user_id: {"state": str, "client": Client, ..., "sensitive_msg_ids": list[int], "expires_at": float}}
 _pending_phone: dict[int, dict] = {}
+
+# Фоновые задачи таймаута для phone code (проактивное уведомление)
+# {user_id: asyncio.Task}
+_phone_timeout_tasks: dict[int, asyncio.Task] = {}
 
 
 def _get_chat_type(update: Update) -> str | None:
@@ -113,6 +118,7 @@ async def cancel_pending_phone(
     user_id: int, bot: Bot | None = None, client: Client | None = None,
 ) -> bool:
     """Отменяет незавершённый phone-логин, удаляет sensitive messages и чистит клиент."""
+    _cancel_phone_timeout_task(user_id)
     pending = _pending_phone.pop(user_id, None)
 
     # Удаляем чувствительные сообщения при отмене/таймауте
@@ -128,6 +134,49 @@ async def cancel_pending_phone(
         await _safe_disconnect_temp_client(client_to_disconnect, user_id)
 
     return pending is not None
+
+
+def _cancel_phone_timeout_task(user_id: int) -> None:
+    """Отменяет фоновую задачу таймаута phone code, если она есть."""
+    task = _phone_timeout_tasks.pop(user_id, None)
+    if task is not None and not task.done():
+        task.cancel()
+
+
+def _start_phone_timeout_task(
+    user_id: int, language_code: str, bot: Bot, chat_id: int,
+) -> None:
+    """Запускает фоновый таймер: по истечении PHONE_CODE_TIMEOUT_SECONDS отправит сообщение."""
+    _cancel_phone_timeout_task(user_id)  # отменяем старый, если есть
+
+    async def _timeout_worker() -> None:
+        try:
+            await asyncio.sleep(PHONE_CODE_TIMEOUT_SECONDS)
+
+            async with serialize_user_update_by_id(user_id):
+                pending = _pending_phone.get(user_id)
+                if pending is None or pending.get("state") != "awaiting_code":
+                    return
+
+                print(f"{get_timestamp()} [CONNECT_PHONE] Code timeout for user {user_id}")
+                # Убираем себя из словаря ДО cancel_pending_phone,
+                # иначе _cancel_phone_timeout_task() отменит текущую задачу
+                _phone_timeout_tasks.pop(user_id, None)
+                try:
+                    msg = await get_system_message(language_code, "connect_code_expired")
+                    await bot.send_message(chat_id=chat_id, text=msg)
+                finally:
+                    # Cleanup всегда, даже если send_message упал
+                    await cancel_pending_phone(user_id, bot=bot)
+        except asyncio.CancelledError:
+            return
+        finally:
+            # Если воркер завершился без явного pop (early return), чистим за собой
+            task = _phone_timeout_tasks.get(user_id)
+            if task is asyncio.current_task():
+                _phone_timeout_tasks.pop(user_id, None)
+
+    _phone_timeout_tasks[user_id] = asyncio.create_task(_timeout_worker())
 
 
 def _get_qr_login_task(user_id: int) -> asyncio.Task | None:
@@ -528,6 +577,9 @@ async def on_confirm_phone_callback(update: Update, context: ContextTypes.DEFAUL
             # Запоминаем ID сообщения с просьбой ввести код
             sensitive_msg_ids.append(sent.message_id)
 
+            # Фоновый таймер — проактивно уведомим об истечении кода
+            _start_phone_timeout_task(u.id, language_code, context.bot, chat_id)
+
             if DEBUG_PRINT:
                 print(f"{get_timestamp()} [CONNECT_PHONE] Code sent to user {u.id}")
 
@@ -667,6 +719,7 @@ async def _handle_phone_code(
 
         if "SessionPasswordNeeded" in error_name:
             # 2FA требуется — переводим в awaiting_2fa
+            _cancel_phone_timeout_task(u.id)
             _put_pending_phone(u.id, {**_pending_phone[u.id], "state": "awaiting_2fa"})
             msg = await get_system_message(language_code, "connect_2fa_prompt")
             sent = await context.bot.send_message(chat_id=chat_id, text=msg)
@@ -679,6 +732,8 @@ async def _handle_phone_code(
             # Неверный код — остаёмся в awaiting_code, даём попробовать ещё раз
             print(f"{get_timestamp()} [CONNECT_PHONE] WARNING: invalid code for user {u.id}")
             _put_pending_phone(u.id, pending)
+            # Перезапускаем таймер — _put_pending_phone обновил expires_at
+            _start_phone_timeout_task(u.id, language_code, context.bot, chat_id)
             msg = await get_system_message(language_code, "connect_code_invalid")
             sent = await context.bot.send_message(chat_id=chat_id, text=msg)
             pending.setdefault("sensitive_msg_ids", []).append(sent.message_id)
@@ -795,6 +850,7 @@ async def _finalize_phone_login(
             print(f"{get_timestamp()} [BOT] User {user_id} connected via phone")
 
     finally:
+        _cancel_phone_timeout_task(user_id)
         _pending_phone.pop(user_id, None)
         await _safe_disconnect_temp_client(client, user_id)
         # Удаляем чувствительные сообщения после завершения (успех или ошибка)
