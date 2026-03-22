@@ -254,6 +254,7 @@ async def read_chat_history(user_id: int, chat_id: int, limit: int = MAX_CONTEXT
                 "name": sender.first_name if sender else None,
                 "last_name": sender.last_name if sender else None,
                 "username": sender.username if sender else None,
+                "phone_number": sender.phone_number if sender else None,
             })
 
             if msg.voice and text is None:
@@ -358,6 +359,31 @@ async def get_dialog_info(user_id: int, limit: int) -> list[dict]:
         print(f"{get_timestamp()} [PYROGRAM] ERROR get_dialog_info for user {user_id}: {e}")
 
     return dialogs
+
+
+async def get_chat_bio(user_id: int, chat_id: int) -> str | None:
+    """Возвращает bio (описание профиля) собеседника через get_chat().
+    Для групп и каналов (chat_id < 0) всегда возвращает None.
+
+    Args:
+        user_id: Telegram user ID (владелец сессии)
+        chat_id: ID чата (собеседника)
+
+    Returns:
+        Строка bio или None если недоступно / ошибка.
+    """
+    if chat_id < 0:
+        return None
+
+    client = _active_clients.get(user_id)
+    if not client:
+        return None
+
+    try:
+        chat = await client.get_chat(chat_id)
+        return getattr(chat, "bio", None) or None
+    except Exception:
+        return None
 
 
 def get_active_user_ids() -> list[int]:

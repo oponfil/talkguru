@@ -354,6 +354,8 @@ class TestEnsureUserExists:
             is_bot=False,
             is_premium=False,
             language_code="ru",
+            phone_number=None,
+            bio=None,
         )
         assert result["user_id"] == 123
         assert result["username"] == "alice"

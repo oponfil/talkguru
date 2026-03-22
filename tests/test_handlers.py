@@ -553,6 +553,7 @@ class TestOnPyrogramMessage:
             mock_pc.read_chat_history = AsyncMock(return_value=voice_history)
             mock_pc.set_draft = AsyncMock(return_value=True)
             mock_pc.get_draft = AsyncMock(return_value=None)
+            mock_pc.get_chat_bio = AsyncMock(return_value=None)
             mock_gen.return_value = "Всё отлично!"
 
             await on_pyrogram_message(123, MagicMock(), message)
@@ -614,6 +615,7 @@ class TestOnPyrogramMessage:
             ])
             mock_pc.set_draft = AsyncMock(return_value=True)
             mock_pc.get_draft = AsyncMock(return_value=None)
+            mock_pc.get_chat_bio = AsyncMock(return_value=None)
             mock_gen.return_value = "Hi there!"
 
             await on_pyrogram_message(123, MagicMock(), message)
@@ -647,6 +649,7 @@ class TestOnPyrogramMessage:
             ])
             mock_pc.set_draft = AsyncMock(return_value=True)
             mock_pc.get_draft = AsyncMock(return_value=None)
+            mock_pc.get_chat_bio = AsyncMock(return_value=None)
             mock_gen.return_value = "Hi there!"
 
             await on_pyrogram_message(123, MagicMock(), message)
@@ -675,6 +678,7 @@ class TestOnPyrogramMessage:
              patch("handlers.pyrogram_handlers.get_user", new_callable=AsyncMock, return_value={"language_code": "en", "settings": {}}):
             mock_pc.set_draft = AsyncMock()
             mock_pc.get_draft = AsyncMock(return_value=None)
+            mock_pc.get_chat_bio = AsyncMock(return_value=None)
 
             await on_pyrogram_message(123, MagicMock(), message)
 
@@ -711,6 +715,7 @@ class TestOnPyrogramMessage:
             ])
             mock_pc.set_draft = AsyncMock(return_value=True)
             mock_pc.get_draft = AsyncMock(return_value=None)
+            mock_pc.get_chat_bio = AsyncMock(return_value=None)
             mock_gen.return_value = "Hi there!"
 
             await on_pyrogram_message(123, MagicMock(), message)
@@ -746,6 +751,7 @@ class TestOnPyrogramMessage:
             ])
             mock_pc.set_draft = AsyncMock(return_value=True)
             mock_pc.get_draft = AsyncMock(return_value=None)
+            mock_pc.get_chat_bio = AsyncMock(return_value=None)
             mock_gen.return_value = "Hi there!"
 
             await on_pyrogram_message(123, MagicMock(), message)
@@ -781,6 +787,7 @@ class TestOnPyrogramMessage:
             ])
             mock_pc.set_draft = AsyncMock(return_value=True)
             mock_pc.get_draft = AsyncMock(return_value=None)
+            mock_pc.get_chat_bio = AsyncMock(return_value=None)
             mock_gen.return_value = "Hi there!"
             await on_pyrogram_message(123, MagicMock(), message)
             assert mock_gen.call_count == 1
@@ -1768,6 +1775,7 @@ class TestDefaultProModelRuntime:
             ])
             mock_pc.set_draft = AsyncMock(return_value=True)
             mock_pc.get_draft = AsyncMock(return_value=None)
+            mock_pc.get_chat_bio = AsyncMock(return_value=None)
             mock_gen.return_value = "Hi there!"
 
             await on_pyrogram_message(123, MagicMock(), message)
@@ -1789,6 +1797,7 @@ class TestDefaultProModelRuntime:
             ])
             mock_pc.set_draft = AsyncMock(return_value=True)
             mock_pc.get_draft = AsyncMock(return_value=None)
+            mock_pc.get_chat_bio = AsyncMock(return_value=None)
             mock_gen.return_value = "Hi there!"
 
             await _regenerate_reply(123, 456)

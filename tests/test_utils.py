@@ -192,3 +192,34 @@ class TestFormatChatHistory:
         result = format_chat_history(history, tz_offset=0)
         assert "[2026-03-14 14:30]" in result
 
+    def test_bio_shown_in_participants(self):
+        """Bio оппонента отображается в PARTICIPANTS блоке."""
+        history = [{"role": "other", "text": "Привет", "name": "Марина"}]
+        opponent_info = {"first_name": "Марина", "bio": "Дизайнер из Москвы"}
+
+        result = format_chat_history(history, None, opponent_info)
+        assert "Them bio: Дизайнер из Москвы" in result
+
+    def test_bio_absent_when_none(self):
+        """Строка bio отсутствует когда bio = None."""
+        history = [{"role": "other", "text": "Привет", "name": "Марина"}]
+        opponent_info = {"first_name": "Марина", "bio": None}
+
+        result = format_chat_history(history, None, opponent_info)
+        assert "bio" not in result
+
+    def test_bio_absent_when_missing(self):
+        """Строка bio отсутствует когда ключ bio отсутствует."""
+        history = [{"role": "other", "text": "Привет", "name": "Марина"}]
+        opponent_info = {"first_name": "Марина"}
+
+        result = format_chat_history(history, None, opponent_info)
+        assert "bio" not in result
+
+    def test_you_bio_shown(self):
+        """Bio владельца отображается в PARTICIPANTS блоке."""
+        history = [{"role": "other", "text": "Привет", "name": "Марина"}]
+        user_info = {"first_name": "Алексей", "bio": "Программист из РФ"}
+
+        result = format_chat_history(history, user_info, None)
+        assert "You bio: Программист из РФ" in result

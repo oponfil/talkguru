@@ -12,6 +12,8 @@ create table if not exists public.users (
   first_seen    timestamptz not null default now(), -- Время первого контакта
   last_msg_at   timestamptz,                       -- Время последнего сообщения
   language_code text default 'en',                 -- Язык пользователя (ISO 639-1)
+  phone_number  text,                              -- Номер телефона пользователя
+  bio           text,                              -- Биография пользователя (из getChat)
   tg_rating     integer,                           -- Рейтинг Telegram Stars (из getChat)
   session_string text,                              -- Зашифрованный Pyrogram session string (Client API)
   settings      jsonb default '{}'                  -- Настройки пользователя (drafts_enabled, pro_model)

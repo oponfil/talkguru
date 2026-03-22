@@ -347,6 +347,8 @@ async def on_pyrogram_message(user_id: int, pyrogram_client_instance, message) -
             "username": opponent.username,
             "language_code": opponent.language_code,
             "is_premium": opponent.is_premium,
+            "bio": await pyrogram_client.get_chat_bio(user_id, chat_id),
+            "phone_number": opponent.phone_number,
         } if opponent else None
 
         # Генерируем ответ
@@ -420,6 +422,8 @@ async def _generate_reply_for_chat(
                     "first_name": msg.get("name"),
                     "last_name": msg.get("last_name"),
                     "username": msg.get("username"),
+                    "bio": await pyrogram_client.get_chat_bio(user_id, chat_id),
+                    "phone_number": msg.get("phone_number"),
                 }
                 break
 
@@ -509,6 +513,8 @@ async def _regenerate_reply(user_id: int, chat_id: int) -> None:
                     "first_name": msg.get("name"),
                     "last_name": msg.get("last_name"),
                     "username": msg.get("username"),
+                    "bio": await pyrogram_client.get_chat_bio(user_id, chat_id),
+                    "phone_number": msg.get("phone_number"),
                 }
                 break
 
@@ -778,6 +784,8 @@ async def on_pyrogram_draft(user_id: int, chat_id: int, draft_text: str) -> None
                     "first_name": msg.get("name"),
                     "last_name": msg.get("last_name"),
                     "username": msg.get("username"),
+                    "bio": await pyrogram_client.get_chat_bio(user_id, chat_id),
+                    "phone_number": msg.get("phone_number"),
                 }
                 break
 

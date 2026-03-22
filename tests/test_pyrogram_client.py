@@ -573,3 +573,63 @@ class TestSendMessage:
         assert result is False
 
         pyrogram_client._active_clients.pop(123, None)
+
+
+class TestGetChatBio:
+    """Тесты для get_chat_bio()."""
+
+    @pytest.mark.asyncio
+    async def test_returns_bio_string(self):
+        """Возвращает bio при успешном get_chat."""
+        mock_client = AsyncMock()
+        mock_chat = MagicMock()
+        mock_chat.bio = "Дизайнер из Москвы"
+        mock_client.get_chat = AsyncMock(return_value=mock_chat)
+
+        pyrogram_client._active_clients[123] = mock_client
+
+        result = await pyrogram_client.get_chat_bio(123, 456)
+
+        assert result == "Дизайнер из Москвы"
+        mock_client.get_chat.assert_called_once_with(456)
+
+        pyrogram_client._active_clients.pop(123, None)
+
+    @pytest.mark.asyncio
+    async def test_returns_none_when_no_client(self):
+        """Без активного клиента → None."""
+        pyrogram_client._active_clients.pop(123, None)
+
+        result = await pyrogram_client.get_chat_bio(123, 456)
+
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_returns_none_on_exception(self):
+        """При ошибке get_chat → None (graceful)."""
+        mock_client = AsyncMock()
+        mock_client.get_chat = AsyncMock(side_effect=Exception("API error"))
+
+        pyrogram_client._active_clients[123] = mock_client
+
+        result = await pyrogram_client.get_chat_bio(123, 456)
+
+        assert result is None
+
+        pyrogram_client._active_clients.pop(123, None)
+
+    @pytest.mark.asyncio
+    async def test_returns_none_when_bio_is_empty(self):
+        """Пустая строка bio → None."""
+        mock_client = AsyncMock()
+        mock_chat = MagicMock()
+        mock_chat.bio = ""
+        mock_client.get_chat = AsyncMock(return_value=mock_chat)
+
+        pyrogram_client._active_clients[123] = mock_client
+
+        result = await pyrogram_client.get_chat_bio(123, 456)
+
+        assert result is None
+
+        pyrogram_client._active_clients.pop(123, None)

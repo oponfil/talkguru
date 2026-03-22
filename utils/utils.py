@@ -165,6 +165,9 @@ def format_chat_history(
     user_profile = format_profile(user_info, "You")
     lines = [f"You: {user_profile}"]
 
+    if user_info and user_info.get("bio"):
+        lines.append(f"You bio: {user_info['bio']}")
+
     # Собираем всех собеседников (Them)
     them_names = []
     seen_names = set()
@@ -185,6 +188,9 @@ def format_chat_history(
         lines.append("Them: " + ", ".join(them_names))
     else:
         lines.append("Them: Them")
+
+    if opponent_info and opponent_info.get("bio"):
+        lines.append(f"Them bio: {opponent_info['bio']}")
 
     parts = ["PARTICIPANTS:\n" + "\n".join(lines)]
 

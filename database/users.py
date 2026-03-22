@@ -30,6 +30,8 @@ async def upsert_user(
     is_bot: bool = False,
     is_premium: bool = False,
     language_code: Optional[str] = None,
+    phone_number: Optional[str] = None,
+    bio: Optional[str] = None,
 ) -> bool:
     """Создаёт или обновляет пользователя в БД.
 
@@ -45,6 +47,10 @@ async def upsert_user(
         data["last_name"] = last_name
     if language_code is not None:
         data["language_code"] = language_code
+    if phone_number is not None:
+        data["phone_number"] = phone_number
+    if bio is not None:
+        data["bio"] = bio
 
     try:
         await run_supabase(
@@ -220,6 +226,8 @@ async def ensure_user_exists(
     is_bot: bool = False,
     is_premium: bool = False,
     language_code: Optional[str] = None,
+    phone_number: Optional[str] = None,
+    bio: Optional[str] = None,
 ) -> dict:
     """Возвращает пользователя, создавая запись при отсутствии.
 
@@ -238,6 +246,8 @@ async def ensure_user_exists(
         is_bot=is_bot,
         is_premium=is_premium,
         language_code=language_code,
+        phone_number=phone_number,
+        bio=bio,
     )
     if not created:
         raise UserStorageError(f"Failed to create user {user_id}")
@@ -250,6 +260,8 @@ async def ensure_user_exists(
         "is_bot": is_bot,
         "is_premium": is_premium,
         "language_code": language_code,
+        "phone_number": phone_number,
+        "bio": bio,
         "settings": {},
     }
 
