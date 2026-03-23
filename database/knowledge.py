@@ -70,9 +70,15 @@ async def sync_chunks(
     stale_keys = existing_keys - all_keys
     deleted = len(stale_keys)
 
-    # 3. Удаляем устаревшие по одному (source + section)
+    # 3. Удаляем устаревшие батчами (группируем по source)
+    stale_by_source: dict[str, list[str | None]] = {}
     for source, section in stale_keys:
-        if section is None:
+        stale_by_source.setdefault(source, []).append(section)
+
+    for source, sections in stale_by_source.items():
+        non_null = [s for s in sections if s is not None]
+        has_null = any(s is None for s in sections)
+        if has_null:
             await run_supabase(
                 lambda s=source: supabase.table("knowledge_chunks")
                 .delete()
@@ -80,20 +86,24 @@ async def sync_chunks(
                 .is_("section", "null")
                 .execute()
             )
-        else:
+        if non_null:
             await run_supabase(
-                lambda s=source, sec=section: supabase.table("knowledge_chunks")
+                lambda s=source, secs=non_null: supabase.table("knowledge_chunks")
                 .delete()
                 .eq("source", s)
-                .eq("section", sec)
+                .in_("section", secs)
                 .execute()
             )
 
-    # 4. Удаляем строки, которые будут заменены (изменённые чанки)
+    # 4. Удаляем строки, которые будут заменены (батчами по source)
+    changes_by_source: dict[str, list[str | None]] = {}
     for row in new_rows:
-        source = row["source"]
-        section = row["section"]
-        if section is None:
+        changes_by_source.setdefault(row["source"], []).append(row["section"])
+
+    for source, sections in changes_by_source.items():
+        non_null = [s for s in sections if s is not None]
+        has_null = any(s is None for s in sections)
+        if has_null:
             await run_supabase(
                 lambda s=source: supabase.table("knowledge_chunks")
                 .delete()
@@ -101,12 +111,12 @@ async def sync_chunks(
                 .is_("section", "null")
                 .execute()
             )
-        else:
+        if non_null:
             await run_supabase(
-                lambda s=source, sec=section: supabase.table("knowledge_chunks")
+                lambda s=source, secs=non_null: supabase.table("knowledge_chunks")
                 .delete()
                 .eq("source", s)
-                .eq("section", sec)
+                .in_("section", secs)
                 .execute()
             )
 
