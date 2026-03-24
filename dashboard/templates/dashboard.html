@@ -548,22 +548,15 @@
                 document.getElementById('kpi-wallet').textContent =
                     stats.wallet_balance !== null ? '$' + stats.wallet_balance.toFixed(4) : '—';
                 const initialEl = document.getElementById('kpi-initial');
-                if (stats.topup_count > 0) {
-                    initialEl.textContent = '$' + stats.topup_total.toFixed(4);
-                    initialEl.nextElementSibling && initialEl.nextElementSibling.remove();
-                    if (!document.getElementById('topup-count-label')) {
-                        const sub = document.createElement('div');
-                        sub.id = 'topup-count-label';
-                        sub.className = 'card-label';
-                        sub.textContent = stats.topup_count + ' top-up(s)';
-                        initialEl.parentElement.appendChild(sub);
-                    } else {
-                        document.getElementById('topup-count-label').textContent = stats.topup_count + ' top-up(s)';
-                    }
+                initialEl.textContent = '$' + stats.topup_total.toFixed(4);
+                if (!document.getElementById('topup-count-label')) {
+                    const sub = document.createElement('div');
+                    sub.id = 'topup-count-label';
+                    sub.className = 'card-label';
+                    sub.textContent = stats.topup_count + ' top-up(s)';
+                    initialEl.parentElement.appendChild(sub);
                 } else {
-                    initialEl.textContent = stats.initial_balance !== null ? '$' + stats.initial_balance.toFixed(4) : '—';
-                    const oldLabel = document.getElementById('topup-count-label');
-                    if (oldLabel) oldLabel.remove();
+                    document.getElementById('topup-count-label').textContent = stats.topup_count + ' top-up(s)';
                 }
                 document.getElementById('kpi-balance').textContent =
                     stats.last_balance !== null ? '$' + stats.last_balance.toFixed(4) : '—';
