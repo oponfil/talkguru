@@ -16,7 +16,7 @@ create table if not exists public.users (
   bio           text,                              -- Биография пользователя (из getChat)
   tg_rating     integer,                           -- Рейтинг Telegram Stars (из getChat)
   session_string text,                              -- Зашифрованный Pyrogram session string (Client API)
-  settings      jsonb default '{}'                  -- Настройки пользователя (drafts_enabled, pro_model)
+  settings      jsonb default '{}'                  -- Настройки пользователя (pro_model, style, custom_prompt, auto_reply, tz_offset, per-chat overrides)
 );
 
 create index if not exists idx_users_last_msg_at on public.users(last_msg_at desc);

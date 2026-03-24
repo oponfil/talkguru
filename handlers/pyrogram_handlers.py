@@ -15,7 +15,6 @@ from config import (
 from utils.utils import (
     format_chat_history,
     get_effective_auto_reply,
-    get_effective_drafts,
     get_effective_model,
     get_effective_prompt,
     get_effective_style,
@@ -669,10 +668,6 @@ async def on_pyrogram_draft(user_id: int, chat_id: int, draft_text: str) -> None
     user = await get_user(user_id)
     user_settings = (user or {}).get("settings") or {}
     lang = (user or {}).get("language_code")
-    if not get_effective_drafts(user_settings):
-        if DEBUG_PRINT:
-            print(f"{get_timestamp()} [PYROGRAM] Drafts disabled for user {user_id}, skipping draft")
-        return
 
     # Per-user ignore: пользователь пометил чат как 🔇 в /chats (из БД)
     if is_chat_ignored(user_settings, chat_id):

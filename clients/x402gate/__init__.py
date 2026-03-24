@@ -207,6 +207,11 @@ class X402GateClient:
 
                 result = response.json()
                 self._prepaid_balance = float(result.get("balance", 0))
+
+                # Сразу фиксируем пополнение в дашборде, чтобы стоимость
+                # следующего запроса не вычиталась из суммы пополнения "Topped Up"
+                dash_stats.update_balance(self._prepaid_balance)
+
                 credited = result.get("credited", "?")
 
                 wallet_usdc = await self._get_wallet_usdc_balance()

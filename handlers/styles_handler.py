@@ -72,14 +72,20 @@ def _find_chat_name(context: ContextTypes.DEFAULT_TYPE, chat_id: int) -> str:
 def _build_styles_keyboard(
     dialogs: list[dict],
     user_settings: dict,
+    messages: dict,
+    visible_count: int | None = None,
 ) -> InlineKeyboardMarkup:
-    """Формирует inline-клавиатуру: одна кнопка с именем чата и иконками настроек."""
+    """Формирует inline-клавиатуру списка чатов с пагинацией."""
     chat_styles = user_settings.get("chat_styles") or {}
     chat_prompts = user_settings.get("chat_prompts") or {}
+    chat_auto_replies = user_settings.get("chat_auto_replies") or {}
     global_style = user_settings.get("style") or DEFAULT_STYLE
 
     keyboard = []
-    for d in dialogs:
+    if visible_count is None:
+        visible_count = ACTIVE_CHATS_LIMIT
+    visible_dialogs = dialogs[:visible_count]
+    for d in visible_dialogs:
         chat_id = d["chat_id"]
         name = _chat_display_name(d)
 
@@ -88,15 +94,24 @@ def _build_styles_keyboard(
         icons = _style_emoji(style)
         if chat_prompts.get(str(chat_id)):
             icons += "📝"
-        ar = get_effective_auto_reply(user_settings, chat_id)
-        if ar == CHAT_IGNORED_SENTINEL:
+
+        # В списке /chats показываем только per-chat override для auto-reply.
+        # Глобальное effective значение здесь намеренно не отражаем.
+        ar_override = chat_auto_replies.get(str(chat_id))
+        if ar_override == CHAT_IGNORED_SENTINEL:
             icons += "🔇"
-        elif ar is not None:
+        elif ar_override and ar_override > 0:
             icons += "⏰"
 
         label = f"{icons} | {name}"
         btn = InlineKeyboardButton(label, callback_data=f"chatmenu:{chat_id}")
         keyboard.append([btn])
+
+    if visible_count < len(dialogs):
+        next_count = min(visible_count + ACTIVE_CHATS_LIMIT, len(dialogs))
+        show_more_label = messages.get("chats_show_more", "⬇️ Show more ⬇️")
+        keyboard.append([InlineKeyboardButton(show_more_label, callback_data=f"chatsmore:{next_count}")])
+
     return InlineKeyboardMarkup(keyboard)
 
 
@@ -139,16 +154,20 @@ def _build_chat_settings_keyboard(
 def _get_relevant_dialogs(
     all_dialogs: list[dict], user_settings: dict, user_id: int,
 ) -> list[dict]:
-    """Фильтрует диалоги: только чаты, где бот ответил или есть кастомная настройка."""
+    """Возвращает список чатов: важные настройки сверху, затем остальные недавние."""
     replied = get_replied_chats(user_id)
     styled_ids = set(int(k) for k in (user_settings.get("chat_styles") or {}))
     ar_ids = set(int(k) for k in (user_settings.get("chat_auto_replies") or {}))
     prompt_ids = set(int(k) for k in (user_settings.get("chat_prompts") or {}))
     relevant_ids = replied | styled_ids | ar_ids | prompt_ids
-    dialogs = [d for d in all_dialogs if d["chat_id"] in relevant_ids]
-    # Чаты с per-chat auto-reply/ignore — сверху
-    dialogs.sort(key=lambda d: d["chat_id"] not in ar_ids)
-    return dialogs[:ACTIVE_CHATS_LIMIT]
+
+    override_dialogs = [d for d in all_dialogs if d["chat_id"] in ar_ids]
+    relevant_dialogs = [
+        d for d in all_dialogs
+        if d["chat_id"] in relevant_ids and d["chat_id"] not in ar_ids
+    ]
+    recent_dialogs = [d for d in all_dialogs if d["chat_id"] not in relevant_ids]
+    return override_dialogs + relevant_dialogs + recent_dialogs
 
 
 @serialize_user_updates
@@ -182,17 +201,45 @@ async def on_chats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text(msg)
         return
 
-    # Сохраняем dialogs в user_data для callback
+    # Сохраняем полный список dialogs в user_data для callback и пагинации
     context.user_data["chats_dialogs"] = dialogs
 
     messages = await get_system_messages(u.language_code)
     title = messages.get("chats_title", "🎭 Chats")
-    keyboard = _build_styles_keyboard(dialogs, user_settings)
+    keyboard = _build_styles_keyboard(dialogs, user_settings, messages)
     await update.message.reply_text(title, reply_markup=keyboard)
 
     if DEBUG_PRINT:
         print(f"{get_timestamp()} [BOT] /chats from user {u.id}, {len(dialogs)} chats")
     dash_stats.record_command("/chats")
+
+
+@serialize_user_updates
+async def on_chats_more_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Показывает следующую страницу списка чатов в /chats."""
+    query = update.callback_query
+    u = update.effective_user
+    await query.answer()
+    await clear_pending_input(context, u.id, context.bot)
+
+    try:
+        visible_count = int(query.data.split(":")[1])
+    except (IndexError, ValueError):
+        return
+
+    dialogs = context.user_data.get("chats_dialogs") or []
+    if not dialogs:
+        messages = await get_system_messages(u.language_code)
+        no_chats = messages.get("chats_no_chats", "No active chats found. Start a conversation first.")
+        await query.edit_message_text(text=no_chats)
+        return
+
+    user = await get_user(u.id)
+    user_settings = (user or {}).get("settings") or {}
+    messages = await get_system_messages(u.language_code)
+    title = messages.get("chats_title", "🎭 Chats")
+    keyboard = _build_styles_keyboard(dialogs, user_settings, messages, visible_count=visible_count)
+    await query.edit_message_text(text=title, reply_markup=keyboard)
 
 
 async def _refresh_chat_settings(

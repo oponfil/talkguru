@@ -377,14 +377,14 @@ class TestUpdateUserSettings:
     async def test_updates_existing_user_settings_with_merge(self):
         mock_table = _make_mock_table()
         with patch("database.users.supabase") as mock_sb, \
-             patch("database.users.get_user", new_callable=AsyncMock, return_value={"settings": {"drafts_enabled": True}}):
+             patch("database.users.get_user", new_callable=AsyncMock, return_value={"settings": {"style": "friend"}}):
             mock_sb.table.return_value = mock_table
 
             result = await update_user_settings(123, {"pro_model": True})
 
-        assert result == {"drafts_enabled": True, "pro_model": True}
+        assert result == {"style": "friend", "pro_model": True}
         mock_table.update.assert_called_once_with(
-            {"settings": {"drafts_enabled": True, "pro_model": True}}
+            {"settings": {"style": "friend", "pro_model": True}}
         )
         mock_table.upsert.assert_not_called()
 

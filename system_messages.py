@@ -88,8 +88,6 @@ SYSTEM_MESSAGES = {
 
     # — Settings —
     "settings_title": "⚙️ Settings\nApplies to all private chats by default.\nUse /chats to override per chat.\n\nTap buttons to change.",
-    "settings_drafts_on": "✏️ Draft editing: ✅ ON",
-    "settings_drafts_off": "✏️ Draft editing: ❌ OFF",
     "settings_model_free": "🤖 Model: FREE",
     "settings_model_pro": "🤖 Model: ⭐ PRO",
     "settings_prompt_set": "📝 Prompt: ✅ ON",
@@ -121,6 +119,7 @@ SYSTEM_MESSAGES = {
     "chats_title": "🎭 Chats",
     "chats_chat_title": "⚙️ {chat_name}",
     "chats_no_chats": "No active chats found. Start a conversation first.",
+    "chats_show_more": "⬇️ Show more ⬇️",
 
 
     # — Chats: per-chat prompt —

@@ -14,7 +14,6 @@ from system_messages import get_system_message, get_system_messages
 from utils.telegram_user import ensure_effective_user
 from handlers.connect_handler import clear_pending_input
 from utils.utils import (
-    get_effective_drafts,
     get_effective_pro_model,
     get_timestamp,
     normalize_auto_reply,
@@ -46,11 +45,9 @@ def _build_timezone_label(offset: float) -> str:
 
 def _build_settings_keyboard(settings: dict, messages: dict) -> InlineKeyboardMarkup:
     """Формирует InlineKeyboard с текущими настройками пользователя."""
-    drafts_enabled = get_effective_drafts(settings)
     pro_model = get_effective_pro_model(settings)
     has_prompt = bool(settings.get("custom_prompt"))
 
-    drafts_label = messages.get("settings_drafts_on") if drafts_enabled else messages.get("settings_drafts_off")
     model_label = messages.get("settings_model_pro") if pro_model else messages.get("settings_model_free")
     prompt_label = messages.get("settings_prompt_set") if has_prompt else messages.get("settings_prompt_empty")
     auto_reply = normalize_auto_reply(settings.get("auto_reply"))
@@ -69,7 +66,6 @@ def _build_settings_keyboard(settings: dict, messages: dict) -> InlineKeyboardMa
     keyboard = [
         [InlineKeyboardButton(model_label, callback_data="settings:model")],
         [InlineKeyboardButton(style_label, callback_data="settings:style")],
-        [InlineKeyboardButton(drafts_label, callback_data="settings:drafts")],
         [InlineKeyboardButton(prompt_label, callback_data="settings:prompt")],
         [InlineKeyboardButton(auto_label, callback_data="settings:auto_reply")],
         [
@@ -134,17 +130,7 @@ async def on_settings_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     if not action.startswith("settings:prompt"):
         await clear_pending_input(context, u.id, context.bot)
 
-    if action == "settings:drafts":
-        current = get_effective_drafts(settings)
-        updated_settings = await update_user_settings(
-            u.id,
-            {"drafts_enabled": not current},
-            current_settings=settings,
-        )
-        if updated_settings is None:
-            await _send_settings_error(query, u.language_code)
-            return
-    elif action == "settings:model":
+    if action == "settings:model":
         current = get_effective_pro_model(settings)
         updated_settings = await update_user_settings(
             u.id,

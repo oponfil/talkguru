@@ -25,17 +25,16 @@ class TestOnSettings:
 
         keyboard = mock_update.message.reply_text.call_args.kwargs["reply_markup"]
         buttons = keyboard.inline_keyboard
-        assert len(buttons) == 6
+        assert len(buttons) == 5
         assert buttons[0][0].text == MESSAGES["settings_model_pro"]
         assert buttons[1][0].text == MESSAGES["settings_style_userlike"]
-        assert buttons[2][0].text == MESSAGES["settings_drafts_on"]
-        assert buttons[3][0].text == MESSAGES["settings_prompt_empty"]
-        assert buttons[4][0].text == f"{MESSAGES['auto_reply_prefix']} {MESSAGES['auto_reply_off']}"
+        assert buttons[2][0].text == MESSAGES["settings_prompt_empty"]
+        assert buttons[3][0].text == f"{MESSAGES['auto_reply_prefix']} {MESSAGES['auto_reply_off']}"
 
     @pytest.mark.asyncio
     async def test_shows_custom_settings(self, mock_update, mock_context):
-        """Показывает сохранённые настройки (drafts OFF, PRO model)."""
-        settings = {"drafts_enabled": False, "pro_model": True}
+        """Показывает сохранённые настройки (PRO model)."""
+        settings = {"pro_model": True}
         with patch("handlers.settings_handler.ensure_effective_user", new_callable=AsyncMock, return_value={"settings": settings}), \
              patch("handlers.settings_handler.get_system_message", new_callable=AsyncMock, return_value=TITLE), \
              patch("handlers.settings_handler.get_system_messages", new_callable=AsyncMock, return_value=MESSAGES):
@@ -44,7 +43,6 @@ class TestOnSettings:
         keyboard = mock_update.message.reply_text.call_args.kwargs["reply_markup"]
         buttons = keyboard.inline_keyboard
         assert buttons[0][0].text == MESSAGES["settings_model_pro"]
-        assert buttons[2][0].text == MESSAGES["settings_drafts_off"]
 
     @pytest.mark.asyncio
     async def test_invalid_auto_reply_is_shown_as_off(self, mock_update, mock_context):
@@ -56,7 +54,7 @@ class TestOnSettings:
             await on_settings(mock_update, mock_context)
 
         keyboard = mock_update.message.reply_text.call_args.kwargs["reply_markup"]
-        assert keyboard.inline_keyboard[4][0].text == f"{MESSAGES['auto_reply_prefix']} {MESSAGES['auto_reply_off']}"
+        assert keyboard.inline_keyboard[3][0].text == f"{MESSAGES['auto_reply_prefix']} {MESSAGES['auto_reply_off']}"
 
     @pytest.mark.asyncio
     async def test_no_prompt_preview_in_settings(self, mock_update, mock_context):
@@ -97,22 +95,7 @@ class TestOnSettingsCallback:
         mock_update.callback_query.message = mock_update.message
         return mock_update
 
-    @pytest.mark.asyncio
-    async def test_toggles_drafts_on_to_off(self, mock_callback_update, mock_context):
-        """Переключает drafts_enabled из ON в OFF."""
-        mock_callback_update.callback_query.data = "settings:drafts"
 
-        with patch("handlers.settings_handler.ensure_effective_user", new_callable=AsyncMock,
-                    return_value={"settings": {"drafts_enabled": True}}), \
-             patch("handlers.settings_handler.update_user_settings", new_callable=AsyncMock, return_value={"drafts_enabled": False}) as mock_update, \
-             patch("handlers.settings_handler.get_system_messages", new_callable=AsyncMock, return_value=MESSAGES):
-            await on_settings_callback(mock_callback_update, mock_context)
-
-        mock_update.assert_called_once_with(
-            mock_callback_update.effective_user.id,
-            {"drafts_enabled": False},
-            current_settings={"drafts_enabled": True},
-        )
 
     @pytest.mark.asyncio
     async def test_toggles_model_pro_to_free(self, mock_callback_update, mock_context):
@@ -163,7 +146,7 @@ class TestOnSettingsCallback:
     @pytest.mark.asyncio
     async def test_sends_error_when_toggle_save_fails(self, mock_callback_update, mock_context):
         """При сбое сохранения отправляет ошибку вместо ложного успеха."""
-        mock_callback_update.callback_query.data = "settings:drafts"
+        mock_callback_update.callback_query.data = "settings:model"
 
         with patch("handlers.settings_handler.ensure_effective_user", new_callable=AsyncMock, return_value={"settings": {}}), \
              patch("handlers.settings_handler.update_user_settings", new_callable=AsyncMock, return_value=None), \
@@ -189,7 +172,7 @@ class TestOnSettingsCallback:
             current_settings={},
         )
         keyboard = mock_callback_update.callback_query.edit_message_text.call_args.kwargs["reply_markup"]
-        assert keyboard.inline_keyboard[4][0].text == MESSAGES['auto_reply_ignore']
+        assert keyboard.inline_keyboard[3][0].text == MESSAGES['auto_reply_ignore']
 
     @pytest.mark.asyncio
     async def test_cycles_style(self, mock_callback_update, mock_context):
@@ -312,13 +295,13 @@ class TestSettingsKeyboardTimezone:
         """Клавиатура содержит 6 строк (включая timezone)."""
         from handlers.settings_handler import _build_settings_keyboard
         keyboard = _build_settings_keyboard({}, MESSAGES)
-        assert len(keyboard.inline_keyboard) == 6
+        assert len(keyboard.inline_keyboard) == 5
 
     def test_timezone_button_shows_utc(self):
         """Кнопка timezone по умолчанию содержит UTC0."""
         from handlers.settings_handler import _build_settings_keyboard
         keyboard = _build_settings_keyboard({}, MESSAGES)
-        tz_row = keyboard.inline_keyboard[5]
+        tz_row = keyboard.inline_keyboard[4]
         assert len(tz_row) == 2
         assert tz_row[0].callback_data == "settings:timezone_back"
         assert "🕐" in tz_row[0].text
@@ -329,5 +312,5 @@ class TestSettingsKeyboardTimezone:
         """Кнопка timezone с offset=5.5 содержит UTC+5:30."""
         from handlers.settings_handler import _build_settings_keyboard
         keyboard = _build_settings_keyboard({"tz_offset": 5.5}, MESSAGES)
-        tz_btn = keyboard.inline_keyboard[5][1]
+        tz_btn = keyboard.inline_keyboard[4][1]
         assert "UTC+5:30" in tz_btn.text

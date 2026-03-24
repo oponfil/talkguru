@@ -70,7 +70,7 @@ python bot.py
 | Command | Description |
 |---------|-------------|
 | `/start` | Welcome message and quick usage guide |
-| `/settings` | Settings: drafts, model (FREE/PRO), prompt, communication style, auto-reply timer, timezone |
+| `/settings` | Settings: model (FREE/PRO), prompt, communication style, auto-reply timer, timezone |
 | `/chats` | Per-chat settings: individual style, auto-reply timer, and system prompt for each chat (connected users only) |
 | `/poke` | Scan the 16 most recent private chats and draft replies to unanswered messages and follow-ups (connected users only) |
 | `/status` | Connection status |
@@ -87,16 +87,15 @@ By default, `/connect` prompts for a phone number. A button below the message le
 
 | Setting | Description | Default |
 |---------|-------------|:-------:|
-| **Drafts** (✏️) | Enable/disable draft instruction processing. When disabled, the bot won't edit drafts based on instructions but will continue creating auto-replies to incoming messages. | ✅ ON |
 | **Model** (🤖) | AI mode: FREE (Gemini 3.1 Flash Lite) or PRO. In PRO mode, the model is selected by communication style: GPT-5.4 for most styles, Gemini 3.1 Pro Preview for seducer. | PRO |
 | **Prompt** (📝) | Custom prompt: describe your persona and add instructions (max 600 chars). The AI uses this to build a *USER PROFILE & CUSTOM INSTRUCTIONS* block. **We recommend adding a self-description** — gender, age, occupation, and texting habits — so the AI mimics your style more accurately. Example: "I'm a 28 y/o guy, designer. I text short, 1–2 sentences, never use periods at the end. I swear a lot and use stickers." Applied to all chats. Applied to drafts and auto-replies. | ❌ OFF |
 | **Style** (🦉/🍻/💕/💼/💰/🕵️/😈) | Communication style: Userlike, Friend, Romance, Business, Sales, Paranoid, Seducer. Sets the tone and manner of replies (including direct bot chat). | 🦉 Userlike |
-| **Auto-reply** (⏰) | Auto-reply timer. If the user doesn't send the draft within the specified time, the bot sends the message itself. Options: OFF, 🔇 Ignore, 1 min, 5 min, 15 min, 1 hour, 16 hours. **Ignore** disables auto-sending globally but does **not** block draft generation (unlike per-chat 🔇 Ignore in `/chats`, which fully disables both drafts and auto-replies for that chat). Actual delay: from base to 2×base (e.g. 16 h → 16–32 h, avg 24 h). | OFF |
+| **Auto-reply** (⏰) | Auto-reply timer. If the user doesn't send the draft within the specified time, the bot sends the message itself. Options: OFF, 🔇 Ignore, 1 min, 5 min, 15 min, 1 hour, 16 hours. **Ignore** disables drafts and auto-replies by default for all chats, but any per-chat override in `/chats` still takes priority. Actual delay: from base to 2×base (e.g. 16 h → 16–32 h, avg 24 h). | OFF |
 | **Timezone** (🕐) | User timezone. The button shows the current time — tap to cycle through 30 popular UTC offsets (including +3:30, +4:30, +5:30, +9:30). Affects message timestamps in AI context. | UTC0 |
 
 ### Per-chat Settings (`/chats`)
 
-The `/chats` command shows only chats where the bot has actually set a draft or replied, as well as chats with custom settings. Each chat is shown as a single button with the chat name.
+The `/chats` command shows recent chats, prioritizing chats with per-chat auto-reply overrides first, then chats where the bot has replied or where custom per-chat settings already exist. Each chat is shown as a single button with the chat name.
 
 Tapping a chat opens a **new message** with three vertical buttons:
 

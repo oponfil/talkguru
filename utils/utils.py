@@ -15,11 +15,6 @@ def get_effective_pro_model(settings: dict) -> bool:
     return settings.get("pro_model", DEFAULT_PRO_MODEL)
 
 
-def get_effective_drafts(settings: dict) -> bool:
-    """Возвращает флаг обработки черновиков с учётом дефолта (True)."""
-    return settings.get("drafts_enabled", True)
-
-
 def get_effective_model(settings: dict, style: str) -> str | None:
     """Возвращает имя PRO-модели для стиля или None (FREE).
 
@@ -265,9 +260,15 @@ def get_effective_auto_reply(settings: dict, chat_id: int | None = None) -> int 
 
 
 def is_chat_ignored(settings: dict, chat_id: int) -> bool:
-    """Возвращает True, если чат помечен как игнорируемый (per-chat sentinel -1)."""
+    """Возвращает True, если чат игнорируется (глобальный или per-chat sentinel -1)."""
+    # Per-chat override имеет приоритет
     chat_auto_replies = settings.get("chat_auto_replies") or {}
-    return chat_auto_replies.get(str(chat_id)) == CHAT_IGNORED_SENTINEL
+    chat_key = str(chat_id)
+    if chat_key in chat_auto_replies:
+        return chat_auto_replies[chat_key] == CHAT_IGNORED_SENTINEL
+    # Глобальный ignore: если в /settings выбран 🔇 Ignore (-1), 
+    # это полностью отключает и автоответы, и генерацию черновиков во всех чатах.
+    return normalize_auto_reply(settings.get("auto_reply")) == CHAT_IGNORED_SENTINEL
 
 
 def get_effective_prompt(settings: dict, chat_id: int | None = None) -> str:

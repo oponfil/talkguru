@@ -41,7 +41,7 @@ from handlers.poke_handler import on_poke  # noqa: E402
 from handlers.styles_handler import (  # noqa: E402
     on_auto_reply_callback, on_chat_menu_callback, on_chat_prompt_callback,
     on_chat_prompt_cancel_callback,
-    on_chat_prompt_clear_callback, on_chats, on_chats_callback,
+    on_chat_prompt_clear_callback, on_chats, on_chats_callback, on_chats_more_callback,
 )
 from utils.pyrogram_utils import restore_sessions  # noqa: E402
 
@@ -103,6 +103,7 @@ def main() -> None:
     app.add_handler(CommandHandler("chats", on_chats, filters=PRIVATE_ONLY_FILTER))
     app.add_handler(CommandHandler("poke", on_poke, filters=PRIVATE_ONLY_FILTER))
     app.add_handler(CallbackQueryHandler(on_settings_callback, pattern=r"^settings:"))
+    app.add_handler(CallbackQueryHandler(on_chats_more_callback, pattern=r"^chatsmore:"))
     app.add_handler(CallbackQueryHandler(on_chats_callback, pattern=r"^chats:"))
     app.add_handler(CallbackQueryHandler(on_chat_menu_callback, pattern=r"^chatmenu:"))
     app.add_handler(CallbackQueryHandler(on_auto_reply_callback, pattern=r"^autoreply:"))

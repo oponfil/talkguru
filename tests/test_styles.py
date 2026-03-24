@@ -18,6 +18,7 @@ from handlers.styles_handler import (
 CHAT_MESSAGES = {
     "chats_title": "Chat Styles",
     "chats_chat_title": "⚙️ {chat_name}",
+    "chats_show_more": "⬇️ Show more ⬇️",
     "settings_prompt_set": "📝 Prompt: ✅ ON",
     "settings_prompt_empty": "📝 Prompt: ❌ OFF",
     "auto_reply_off": "✅ OFF",
@@ -143,10 +144,17 @@ class TestIsChatIgnored:
         """Чат без override → not ignored."""
         assert is_chat_ignored({}, 100) is False
 
-    def test_global_irrelevant(self):
-        """Глобальный auto_reply не делает чат ignored."""
+    def test_global_ignore(self):
+        """Глобальный auto_reply -1 → все чаты ignored."""
         settings = {"auto_reply": -1}
+        assert is_chat_ignored(settings, 100) is True
+
+    def test_per_chat_overrides_global_ignore(self):
+        """Per-chat override имеет приоритет над глобальным ignore."""
+        settings = {"auto_reply": -1, "chat_auto_replies": {"100": 60}}
         assert is_chat_ignored(settings, 100) is False
+        # Другой чат без override → глобальный ignore
+        assert is_chat_ignored(settings, 200) is True
 
 
 # ====== Config mappings ======
@@ -246,7 +254,7 @@ class TestStylesHelpers:
             "chat_prompts": {"100": "Be formal"},
             "chat_auto_replies": {"100": 60},
         }
-        keyboard = _build_styles_keyboard(dialogs, user_settings)
+        keyboard = _build_styles_keyboard(dialogs, user_settings, CHAT_MESSAGES)
         buttons = keyboard.inline_keyboard
         assert len(buttons) == 2
         assert len(buttons[0]) == 1
@@ -261,9 +269,42 @@ class TestStylesHelpers:
         """🔇 показывается для ignored чатов."""
         dialogs = [{"chat_id": 100, "first_name": "Алиса", "last_name": "", "username": ""}]
         user_settings = {"chat_auto_replies": {"100": -1}}
-        keyboard = _build_styles_keyboard(dialogs, user_settings)
+        keyboard = _build_styles_keyboard(dialogs, user_settings, CHAT_MESSAGES)
         assert "🔇" in keyboard.inline_keyboard[0][0].text
         assert "⏰" not in keyboard.inline_keyboard[0][0].text
+
+    def test_build_styles_keyboard_show_more_button(self):
+        """Под списком появляется кнопка Show more, если есть следующая страница."""
+        dialogs = [
+            {"chat_id": 100, "first_name": "Алиса", "last_name": "", "username": ""},
+            {"chat_id": 200, "first_name": "Боб", "last_name": "", "username": ""},
+        ]
+        keyboard = _build_styles_keyboard(dialogs, {}, CHAT_MESSAGES, visible_count=1)
+        buttons = keyboard.inline_keyboard
+        assert len(buttons) == 2
+        assert buttons[0][0].callback_data == "chatmenu:100"
+        assert buttons[1][0].text == CHAT_MESSAGES["chats_show_more"]
+        assert buttons[1][0].callback_data == "chatsmore:2"
+
+    def test_get_relevant_dialogs_prioritizes_overrides_then_recent(self):
+        """Сначала идут чаты с override, затем остальные важные, затем просто недавние."""
+        all_dialogs = [
+            {"chat_id": 200, "first_name": "Боб", "last_name": "", "username": ""},
+            {"chat_id": 100, "first_name": "Алиса", "last_name": "", "username": ""},
+            {"chat_id": 300, "first_name": "Клара", "last_name": "", "username": ""},
+            {"chat_id": 400, "first_name": "Ден", "last_name": "", "username": ""},
+        ]
+        user_settings = {
+            "chat_styles": {"100": "friend"},
+            "chat_auto_replies": {"300": 60},
+            "chat_prompts": {"400": "be concise"},
+        }
+
+        with patch("handlers.styles_handler.get_replied_chats", return_value=set()):
+            from handlers.styles_handler import _get_relevant_dialogs
+            dialogs = _get_relevant_dialogs(all_dialogs, user_settings, user_id=123)
+
+        assert [dialog["chat_id"] for dialog in dialogs] == [300, 100, 400, 200]
 
     def test_build_chat_settings_keyboard_three_buttons_column(self):
         """Level 2: три кнопки в столбец — стиль, промпт, автоответ."""
@@ -371,6 +412,78 @@ class TestOnStyles:
         assert len(kb.inline_keyboard[0]) == 1  # одна кнопка на строку
         assert "Алиса" in kb.inline_keyboard[0][0].text
         assert "chatmenu:100" in kb.inline_keyboard[0][0].callback_data
+
+    @pytest.mark.asyncio
+    async def test_shows_recent_chats_without_existing_overrides(self, mock_update, mock_context):
+        """Если override еще нет, /chats всё равно показывает недавние диалоги."""
+        dialogs = [
+            {"chat_id": 100, "first_name": "Алиса", "last_name": "", "username": ""},
+            {"chat_id": 200, "first_name": "Боб", "last_name": "", "username": ""},
+        ]
+        with patch("handlers.styles_handler.pyrogram_client") as mock_pc, \
+             patch("handlers.styles_handler.get_user", new_callable=AsyncMock, return_value={"settings": {}}), \
+             patch("handlers.styles_handler.get_replied_chats", return_value=set()), \
+             patch("handlers.styles_handler.get_system_messages", new_callable=AsyncMock, return_value=CHAT_MESSAGES):
+            mock_pc.is_active.return_value = True
+            mock_pc.get_dialog_info = AsyncMock(return_value=dialogs)
+            from handlers.styles_handler import on_chats
+            await on_chats(mock_update, mock_context)
+
+        kb = mock_update.message.reply_text.call_args.kwargs["reply_markup"]
+        assert len(kb.inline_keyboard) == 2
+        assert "Алиса" in kb.inline_keyboard[0][0].text
+        assert "Боб" in kb.inline_keyboard[1][0].text
+
+    @pytest.mark.asyncio
+    async def test_shows_more_button_when_more_dialogs_available(self, mock_update, mock_context):
+        """Если чатов больше лимита страницы, показывается кнопка Show more."""
+        dialogs = [
+            {"chat_id": 100, "first_name": "Алиса", "last_name": "", "username": ""},
+            {"chat_id": 200, "first_name": "Боб", "last_name": "", "username": ""},
+        ]
+        with patch("handlers.styles_handler.ACTIVE_CHATS_LIMIT", 1), \
+             patch("handlers.styles_handler.pyrogram_client") as mock_pc, \
+             patch("handlers.styles_handler.get_user", new_callable=AsyncMock, return_value={"settings": {}}), \
+             patch("handlers.styles_handler.get_replied_chats", return_value=set()), \
+             patch("handlers.styles_handler.get_system_messages", new_callable=AsyncMock, return_value=CHAT_MESSAGES):
+            mock_pc.is_active.return_value = True
+            mock_pc.get_dialog_info = AsyncMock(return_value=dialogs)
+            from handlers.styles_handler import on_chats
+            await on_chats(mock_update, mock_context)
+
+        kb = mock_update.message.reply_text.call_args.kwargs["reply_markup"]
+        assert len(kb.inline_keyboard) == 2
+        assert kb.inline_keyboard[0][0].callback_data == "chatmenu:100"
+        assert kb.inline_keyboard[1][0].text == CHAT_MESSAGES["chats_show_more"]
+        assert kb.inline_keyboard[1][0].callback_data == "chatsmore:2"
+
+    @pytest.mark.asyncio
+    async def test_chats_more_callback_expands_list(self, mock_update, mock_context):
+        """Кнопка Show more раскрывает следующую страницу того же списка."""
+        mock_query = AsyncMock()
+        mock_query.data = "chatsmore:2"
+        mock_query.answer = AsyncMock()
+        mock_query.edit_message_text = AsyncMock()
+        mock_update.callback_query = mock_query
+
+        mock_context.user_data["chats_dialogs"] = [
+            {"chat_id": 100, "first_name": "Алиса", "last_name": "", "username": ""},
+            {"chat_id": 200, "first_name": "Боб", "last_name": "", "username": ""},
+            {"chat_id": 300, "first_name": "Клара", "last_name": "", "username": ""},
+        ]
+
+        with patch("handlers.styles_handler.ACTIVE_CHATS_LIMIT", 1), \
+             patch("handlers.styles_handler.get_user", new_callable=AsyncMock, return_value={"settings": {}}), \
+             patch("handlers.styles_handler.get_system_messages", new_callable=AsyncMock, return_value=CHAT_MESSAGES):
+            from handlers.styles_handler import on_chats_more_callback
+            await on_chats_more_callback(mock_update, mock_context)
+
+        mock_query.edit_message_text.assert_called_once()
+        kb = mock_query.edit_message_text.call_args.kwargs["reply_markup"]
+        assert len(kb.inline_keyboard) == 3
+        assert kb.inline_keyboard[0][0].callback_data == "chatmenu:100"
+        assert kb.inline_keyboard[1][0].callback_data == "chatmenu:200"
+        assert kb.inline_keyboard[2][0].callback_data == "chatsmore:3"
 
     @pytest.mark.asyncio
     async def test_opening_chats_clears_prompt_waiting_state(self, mock_update, mock_context):
