@@ -259,13 +259,26 @@ def get_effective_auto_reply(settings: dict, chat_id: int | None = None) -> int 
     return normalize_auto_reply(settings.get("auto_reply"))
 
 
-def is_chat_ignored(settings: dict, chat_id: int) -> bool:
-    """Возвращает True, если чат игнорируется (глобальный или per-chat sentinel -1)."""
-    # Per-chat override имеет приоритет
+def is_chat_specifically_ignored(settings: dict, chat_id: int) -> bool:
+    """Возвращает True, только если на этот конкретный чат установлен 🔇 Ignore."""
     chat_auto_replies = settings.get("chat_auto_replies") or {}
     chat_key = str(chat_id)
     if chat_key in chat_auto_replies:
         return chat_auto_replies[chat_key] == CHAT_IGNORED_SENTINEL
+    return False
+
+
+def is_chat_ignored(settings: dict, chat_id: int) -> bool:
+    """Возвращает True, если чат игнорируется (глобальный или per-chat sentinel -1)."""
+    if is_chat_specifically_ignored(settings, chat_id):
+        return True
+
+    # Решаем по глобальному override, если настройки для чата нет
+    chat_auto_replies = settings.get("chat_auto_replies") or {}
+    chat_key = str(chat_id)
+    if chat_key in chat_auto_replies:
+        return False  # Есть явная настройка (и она не Ignore, так как мы проверили выше)
+
     # Глобальный ignore: если в /settings выбран 🔇 Ignore (-1), 
     # это полностью отключает и автоответы, и генерацию черновиков во всех чатах.
     return normalize_auto_reply(settings.get("auto_reply")) == CHAT_IGNORED_SENTINEL

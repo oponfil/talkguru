@@ -272,6 +272,11 @@
             animation: pulse 2s infinite;
         }
 
+        .refresh-indicator.refresh-stopped {
+            animation: none;
+            background: #484f58;
+        }
+
         @keyframes pulse {
 
             0%,
@@ -302,7 +307,7 @@
         <div class="header-stats">
             <span>Uptime: <strong id="uptime">—</strong></span>
             <span>LLM requests: <strong id="total-requests">0</strong></span>
-            <span><span class="refresh-indicator"></span>Auto-refresh 5s</span>
+            <span><span class="refresh-indicator" id="refresh-indicator"></span><span id="refresh-status"></span></span>
         </div>
     </div>
 
@@ -405,8 +410,40 @@
 
     <script id="style-emoji-data" type="application/json">{{ style_emoji_pairs | tojson }}</script>
     <script>
+        const REFRESH_INTERVAL_MS = {{ dashboard_refresh_interval_ms }};
+        const AUTO_REFRESH_DURATION_MS = {{ dashboard_auto_refresh_duration_ms }};
+
+        const _pageLoadAt = Date.now();
+        let _refreshTimerId = null;
+
         let _lastLogs = [];
         let _logFilter = 'ALL';
+
+        function setAutoRefreshStopped() {
+            const ind = document.getElementById('refresh-indicator');
+            const status = document.getElementById('refresh-status');
+            if (ind) ind.classList.add('refresh-stopped');
+            if (status) {
+                status.textContent =
+                    'Auto-refresh stopped — reload page to resume (' +
+                    (AUTO_REFRESH_DURATION_MS / 60000) +
+                    ' min / every ' +
+                    (REFRESH_INTERVAL_MS / 1000) +
+                    's)';
+            }
+        }
+
+        function tickAutoRefresh() {
+            if (Date.now() - _pageLoadAt >= AUTO_REFRESH_DURATION_MS) {
+                if (_refreshTimerId !== null) {
+                    clearInterval(_refreshTimerId);
+                    _refreshTimerId = null;
+                }
+                setAutoRefreshStopped();
+                return;
+            }
+            refresh();
+        }
 
         function formatUptime(seconds) {
             const d = Math.floor(seconds / 86400);
@@ -610,8 +647,19 @@
             }
         }
 
-        refresh();
-        setInterval(refresh, 5000);
+        (function initAutoRefresh() {
+            const status = document.getElementById('refresh-status');
+            if (status) {
+                status.textContent =
+                    'Auto every ' +
+                    (REFRESH_INTERVAL_MS / 1000) +
+                    's for ' +
+                    (AUTO_REFRESH_DURATION_MS / 60000) +
+                    ' min';
+            }
+            refresh();
+            _refreshTimerId = setInterval(tickAutoRefresh, REFRESH_INTERVAL_MS);
+        })();
     </script>
 
 </body>

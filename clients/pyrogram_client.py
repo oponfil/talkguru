@@ -1,15 +1,18 @@
 # clients/pyrogram_client.py — Управление Pyrogram-сессиями пользователей
+# pyright: reportMissingImports=false
 
 import asyncio
-from typing import Any, Callable
 from collections import defaultdict
 from datetime import datetime, timezone
+from typing import Any, Callable
 
-from pyrogram import Client, filters, raw
 import pyrogram
+from pyrogram import Client, filters, raw
+from pyrogram.errors import Unauthorized
 from pyrogram.handlers import MessageHandler, RawUpdateHandler
 
 from config import PYROGRAM_API_ID, PYROGRAM_API_HASH, MAX_CONTEXT_MESSAGES, MAX_CONTEXT_CHARS, DEBUG_PRINT, VOICE_TRANSCRIPTION_DELAY, VOICE_TRANSCRIPTION_TIMEOUT, POLL_MISSED_DIALOGS_LIMIT, STICKER_FALLBACK_EMOJI
+from database.users import clear_session
 from utils.utils import get_timestamp
 
 
@@ -125,6 +128,8 @@ async def start_listening(user_id: int, session_string: str) -> bool:
     """
     # Останавливаем предыдущий клиент, если есть
     await stop_listening(user_id)
+    # Сбрасываем историю временных ошибок перед новым запуском клиента.
+    _consecutive_errors.pop(user_id, None)
 
     try:
         client = await create_client(user_id, session_string)
@@ -182,12 +187,14 @@ async def stop_listening(user_id: int) -> bool:
     """Останавливает Pyrogram-клиент пользователя."""
     client = _active_clients.get(user_id)
     if not client:
+        _consecutive_errors.pop(user_id, None)
         return True
 
     try:
         loop = asyncio.get_running_loop()
         await client.stop()
         _active_clients.pop(user_id, None)
+        _consecutive_errors.pop(user_id, None)
         if not _active_clients:
             _restore_pyrogram_exception_handler(loop)
         print(f"{get_timestamp()} [PYROGRAM] Stopped listening for user {user_id}")
@@ -300,6 +307,23 @@ async def read_chat_history(user_id: int, chat_id: int, limit: int = MAX_CONTEXT
     return messages
 
 
+# Трекер последовательных ошибок для отключения "мертвых" клиентов
+_consecutive_errors: dict[int, int] = defaultdict(int)
+
+async def _force_disconnect(user_id: int, reason: str) -> None:
+    """Останавливает клиента и стирает сессию из БД при фатальной/перманентной сетевой ошибке."""
+    print(f"{get_timestamp()} [PYROGRAM] \U0001f50c Auto-disconnecting user {user_id} due to: {reason}")
+    stopped = await stop_listening(user_id)
+    _consecutive_errors.pop(user_id, None)
+    if not stopped:
+        print(
+            f"{get_timestamp()} [PYROGRAM] WARNING force_disconnect aborted for user {user_id}: "
+            "client stop failed, session preserved to avoid in-memory/DB desync"
+        )
+        return
+    await clear_session(user_id)
+
+
 async def get_private_dialogs(user_id: int, limit: int = POLL_MISSED_DIALOGS_LIMIT) -> list[int]:
     """Возвращает список chat_id приватных диалогов пользователя.
 
@@ -319,8 +343,19 @@ async def get_private_dialogs(user_id: int, limit: int = POLL_MISSED_DIALOGS_LIM
         async for dialog in client.get_dialogs(limit):
             if dialog.chat and dialog.chat.type.value == "private":
                 chat_ids.append(dialog.chat.id)
+        # Сброс счётчика при успехе
+        _consecutive_errors.pop(user_id, None)
+    except Unauthorized as e:
+        print(f"{get_timestamp()} [PYROGRAM] ERROR Unauthorized get_private_dialogs for user {user_id}: {e}")
+        await _force_disconnect(user_id, "Unauthorized session (Revoked/Deactivated/AuthKeyUnregistered)")
     except Exception as e:
         print(f"{get_timestamp()} [PYROGRAM] ERROR get_private_dialogs for user {user_id}: {e}")
+        _consecutive_errors[user_id] += 1
+        if _consecutive_errors[user_id] == 5:
+            print(
+                f"{get_timestamp()} [PYROGRAM] WARNING get_private_dialogs for user {user_id}: "
+                "5 consecutive non-auth errors; keeping session and waiting for recovery"
+            )
 
     return chat_ids
 

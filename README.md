@@ -107,7 +107,7 @@ Per-chat settings override the global ones from `/settings`. If a per-chat value
 
 **Typing indicator:** While generating a reply, the bot shows a status in the chat with the active style emoji (e.g. `💕 is typing...` for Romance or `😈 is typing...` for Seducer).
 
-**Emoji shortcut in draft:** put a style emoji in the chat draft — the bot will switch the style and generate a reply. If the chosen emoji matches your **global style** (set in `/settings`), the per-chat override will be cleared.
+**Emoji shortcut in draft:** put a style emoji in the chat draft — the bot will switch the style and generate a reply. This works even if your global auto-reply is set to 🔇 Ignore, but it will NOT work if you explicitly set 🔇 Ignore for this specific chat via `/chats`. If the chosen emoji matches your **global style** (set in `/settings`), the per-chat override will be cleared.
 
 | Emoji | Style |
 |-------|-------|

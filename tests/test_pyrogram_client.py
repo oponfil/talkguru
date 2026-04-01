@@ -118,6 +118,110 @@ class TestStopListening:
 
         del pyrogram_client._active_clients[200]
 
+    @pytest.mark.asyncio
+    async def test_clears_consecutive_errors_on_stop(self):
+        """При остановке клиента сбрасывается история временных ошибок."""
+        mock_client = AsyncMock()
+        pyrogram_client._active_clients[300] = mock_client
+        pyrogram_client._consecutive_errors[300] = 4
+
+        result = await pyrogram_client.stop_listening(300)
+
+        assert result is True
+        assert 300 not in pyrogram_client._consecutive_errors
+
+
+class TestStartListening:
+    """Тесты для start_listening()."""
+
+    @pytest.mark.asyncio
+    async def test_resets_consecutive_errors_before_new_session(self):
+        """Новая сессия не наследует старый счётчик ошибок."""
+        mock_client = AsyncMock()
+        mock_loop = MagicMock()
+        pyrogram_client._consecutive_errors[400] = 4
+
+        with patch.object(pyrogram_client, "create_client", new_callable=AsyncMock, return_value=mock_client), \
+             patch.object(pyrogram_client, "_install_pyrogram_exception_handler"), \
+             patch("clients.pyrogram_client.asyncio.get_running_loop", return_value=mock_loop):
+            result = await pyrogram_client.start_listening(400, "session")
+
+        assert result is True
+        assert 400 not in pyrogram_client._consecutive_errors
+
+        pyrogram_client._active_clients.pop(400, None)
+
+
+class TestGetPrivateDialogs:
+    """Тесты для get_private_dialogs()."""
+
+    def teardown_method(self):
+        pyrogram_client._active_clients.clear()
+        pyrogram_client._consecutive_errors.clear()
+
+    @pytest.mark.asyncio
+    async def test_does_not_disconnect_on_generic_errors(self):
+        """Временные ошибки не должны очищать сессию."""
+        mock_client = MagicMock()
+
+        async def failing_dialogs(*args, **kwargs):
+            if False:
+                yield None
+            raise Exception("temporary network error")
+
+        mock_client.get_dialogs = failing_dialogs
+        pyrogram_client._active_clients[500] = mock_client
+
+        with patch.object(pyrogram_client, "_force_disconnect", new_callable=AsyncMock) as mock_force_disconnect:
+            result = await pyrogram_client.get_private_dialogs(500)
+
+        assert result == []
+        assert pyrogram_client._consecutive_errors[500] == 1
+        mock_force_disconnect.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_disconnects_on_unauthorized(self):
+        """Auth-ошибка по-прежнему ведёт к очистке сессии."""
+        mock_client = MagicMock()
+
+        async def failing_dialogs(*args, **kwargs):
+            if False:
+                yield None
+            raise pyrogram_client.Unauthorized("revoked")
+
+        mock_client.get_dialogs = failing_dialogs
+        pyrogram_client._active_clients[600] = mock_client
+
+        with patch.object(pyrogram_client, "_force_disconnect", new_callable=AsyncMock) as mock_force_disconnect:
+            result = await pyrogram_client.get_private_dialogs(600)
+
+        assert result == []
+        mock_force_disconnect.assert_awaited_once()
+
+
+class TestForceDisconnect:
+    """Тесты для _force_disconnect()."""
+
+    @pytest.mark.asyncio
+    async def test_preserves_session_when_stop_fails(self):
+        """Если stop_listening не сработал, session в БД не очищается."""
+        with patch.object(pyrogram_client, "stop_listening", new_callable=AsyncMock, return_value=False) as mock_stop, \
+             patch.object(pyrogram_client, "clear_session", new_callable=AsyncMock) as mock_clear_session:
+            await pyrogram_client._force_disconnect(700, "Unauthorized")
+
+        mock_stop.assert_awaited_once_with(700)
+        mock_clear_session.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_clears_session_after_successful_stop(self):
+        """После успешной остановки клиента session очищается."""
+        with patch.object(pyrogram_client, "stop_listening", new_callable=AsyncMock, return_value=True) as mock_stop, \
+             patch.object(pyrogram_client, "clear_session", new_callable=AsyncMock) as mock_clear_session:
+            await pyrogram_client._force_disconnect(701, "Unauthorized")
+
+        mock_stop.assert_awaited_once_with(701)
+        mock_clear_session.assert_awaited_once_with(701)
+
 
 class TestReadChatHistory:
     """Тесты для read_chat_history()."""

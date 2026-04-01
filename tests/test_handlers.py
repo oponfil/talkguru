@@ -35,7 +35,7 @@ from handlers.connect_handler import (
 from system_messages import SYSTEM_MESSAGES
 from utils.bot_utils import update_user_menu
 
-from config import DEFAULT_STYLE, STYLE_TO_EMOJI
+from config import CHAT_IGNORED_SENTINEL, DEFAULT_STYLE, STYLE_TO_EMOJI
 TYPING_TEXT = SYSTEM_MESSAGES["draft_typing"].format(emoji=STYLE_TO_EMOJI[DEFAULT_STYLE])
 REAL_ASYNCIO_SLEEP = asyncio.sleep
 
@@ -978,6 +978,51 @@ class TestOnPyrogramDraft:
             await on_pyrogram_draft(123, 456, f"{emoji} напиши стихи")
 
         mock_update_style.assert_called_once_with(123, 456, None)
+
+    @pytest.mark.asyncio
+    async def test_emoji_shortcut_bypasses_global_ignore(self):
+        """Глобальный Ignore не должен блокировать ручной emoji shortcut."""
+        _bot_drafts.pop((123, 456), None)
+        _pending_drafts.pop((123, 456), None)
+
+        with patch("handlers.pyrogram_handlers.pyrogram_client") as mock_pc, \
+             patch("handlers.pyrogram_handlers.generate_response", new_callable=AsyncMock) as mock_gen, \
+             patch("handlers.pyrogram_handlers.asyncio.sleep", new_callable=AsyncMock), \
+             patch("handlers.pyrogram_handlers.get_user", new_callable=AsyncMock, side_effect=[
+                 {"language_code": "en", "settings": {"auto_reply": CHAT_IGNORED_SENTINEL}},
+                 {"language_code": "en", "settings": {"auto_reply": CHAT_IGNORED_SENTINEL, "chat_styles": {"456": "romance"}}},
+             ]), \
+             patch("handlers.pyrogram_handlers.get_system_message", new_callable=AsyncMock, return_value=TYPING_TEXT), \
+             patch("handlers.pyrogram_handlers.update_chat_style", new_callable=AsyncMock) as mock_update_style:
+            mock_pc.read_chat_history = AsyncMock(return_value=[
+                {"role": "user", "text": "Привет"},
+            ])
+            mock_pc.set_draft = AsyncMock(return_value=True)
+            mock_gen.return_value = "AI ответ"
+
+            await on_pyrogram_draft(123, 456, "💕 напиши стихи")
+
+        mock_update_style.assert_called_once_with(123, 456, "romance")
+        mock_gen.assert_called_once()
+        mock_pc.set_draft.assert_any_call(123, 456, "AI ответ")
+
+    @pytest.mark.asyncio
+    async def test_emoji_shortcut_does_not_bypass_specific_ignore(self):
+        """Per-chat Ignore должен блокировать даже ручной emoji shortcut."""
+        with patch("handlers.pyrogram_handlers.pyrogram_client") as mock_pc, \
+             patch("handlers.pyrogram_handlers.generate_response", new_callable=AsyncMock) as mock_gen, \
+             patch("handlers.pyrogram_handlers.get_user", new_callable=AsyncMock, return_value={
+                 "language_code": "en",
+                 "settings": {"chat_auto_replies": {"456": CHAT_IGNORED_SENTINEL}},
+             }), \
+             patch("handlers.pyrogram_handlers.update_chat_style", new_callable=AsyncMock) as mock_update_style:
+            mock_pc.set_draft = AsyncMock(return_value=True)
+
+            await on_pyrogram_draft(123, 456, "💕 напиши стихи")
+
+        mock_update_style.assert_not_called()
+        mock_gen.assert_not_called()
+        mock_pc.set_draft.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_emoji_only_clears_probe_when_history_is_empty(self):

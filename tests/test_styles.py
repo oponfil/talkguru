@@ -6,7 +6,13 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from config import EMOJI_TO_STYLE, STYLE_TO_EMOJI
-from utils.utils import get_effective_auto_reply, get_effective_prompt, get_effective_style, is_chat_ignored
+from utils.utils import (
+    get_effective_auto_reply,
+    get_effective_prompt,
+    get_effective_style,
+    is_chat_ignored,
+    is_chat_specifically_ignored,
+)
 from handlers.styles_handler import (
     _auto_reply_label,
     _chat_display_name,
@@ -155,6 +161,28 @@ class TestIsChatIgnored:
         assert is_chat_ignored(settings, 100) is False
         # Другой чат без override → глобальный ignore
         assert is_chat_ignored(settings, 200) is True
+
+
+class TestIsChatSpecificallyIgnored:
+    """Тесты для is_chat_specifically_ignored()."""
+
+    def test_per_chat_ignore_sentinel(self):
+        """Только явный 🔇 Ignore на чат → True."""
+        settings = {"chat_auto_replies": {"100": -1}}
+        assert is_chat_specifically_ignored(settings, 100) is True
+
+    def test_per_chat_non_ignore(self):
+        """Per-chat с обычным автоответом → False."""
+        settings = {"chat_auto_replies": {"100": 60}}
+        assert is_chat_specifically_ignored(settings, 100) is False
+
+    def test_no_entry_for_chat(self):
+        """Нет записи для chat_id → False (даже при глобальном ignore)."""
+        settings = {"auto_reply": -1, "chat_auto_replies": {"200": 60}}
+        assert is_chat_specifically_ignored(settings, 100) is False
+
+    def test_empty_settings(self):
+        assert is_chat_specifically_ignored({}, 100) is False
 
 
 # ====== Config mappings ======

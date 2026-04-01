@@ -13,7 +13,11 @@ import pathlib
 import jinja2
 from aiohttp import web
 
-from config import EMOJI_TO_STYLE
+from config import (
+    DASHBOARD_AUTO_REFRESH_DURATION_SEC,
+    DASHBOARD_REFRESH_INTERVAL_SEC,
+    EMOJI_TO_STYLE,
+)
 from dashboard import stats
 from dashboard.auth import DASHBOARD_KEY, check_auth, set_auth_cookie
 from database.users import get_dashboard_user_stats
@@ -52,7 +56,11 @@ async def handle_dashboard(request: web.Request) -> web.Response:
     )
     template = env.get_template("dashboard.html")
     style_emoji_pairs = [[style, emoji] for emoji, style in EMOJI_TO_STYLE.items()]
-    html = template.render(style_emoji_pairs=style_emoji_pairs)
+    html = template.render(
+        style_emoji_pairs=style_emoji_pairs,
+        dashboard_refresh_interval_ms=DASHBOARD_REFRESH_INTERVAL_SEC * 1000,
+        dashboard_auto_refresh_duration_ms=DASHBOARD_AUTO_REFRESH_DURATION_SEC * 1000,
+    )
 
     response = web.Response(text=html, content_type="text/html")
     set_auth_cookie(response)

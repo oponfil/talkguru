@@ -20,6 +20,7 @@ from utils.utils import (
     get_effective_style,
     get_timestamp,
     is_chat_ignored,
+    is_chat_specifically_ignored,
     serialize_user_updates,
     typing_action,
 )
@@ -669,10 +670,6 @@ async def on_pyrogram_draft(user_id: int, chat_id: int, draft_text: str) -> None
     user_settings = (user or {}).get("settings") or {}
     lang = (user or {}).get("language_code")
 
-    # Per-user ignore: пользователь пометил чат как 🔇 в /chats (из БД)
-    if is_chat_ignored(user_settings, chat_id):
-        return
-
     # Emoji-шорткат: пользователь ставит emoji стиля (опционально + инструкцию)
     emoji_style = None
     instruction = draft_text
@@ -683,7 +680,18 @@ async def on_pyrogram_draft(user_id: int, chat_id: int, draft_text: str) -> None
             instruction = stripped[len(emoji):].strip()
             break
 
-    if emoji_style is not None or (stripped in EMOJI_TO_STYLE):
+    is_emoji_shortcut = emoji_style is not None or (stripped in EMOJI_TO_STYLE)
+
+    # Жесткий ручной игнор на конкретный чат — блокирует всё, даже шорткаты
+    if is_chat_specifically_ignored(user_settings, chat_id):
+        return
+
+    # Глобальный игнор: блокируем обычный набор текста, 
+    # НО если это ручной вызов через эмодзи-шорткат — пробиваем глобальный блок.
+    if is_chat_ignored(user_settings, chat_id) and not is_emoji_shortcut:
+        return
+
+    if is_emoji_shortcut:
         # Сохраняем per-chat стиль
         if emoji_style is None:
             emoji_style = EMOJI_TO_STYLE[stripped]
