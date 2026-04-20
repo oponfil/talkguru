@@ -112,10 +112,17 @@ AUTO_REPLY_OPTIONS: dict[int | None, str] = {
     None: "auto_reply_off",
     CHAT_IGNORED_SENTINEL: "auto_reply_ignore",
     60: "auto_reply_1m",
-    300: "auto_reply_5m",
     900: "auto_reply_15m",
-    3600: "auto_reply_1h",
     57600: "auto_reply_16h",
+}
+
+# ====== FOLLOW-UP ======
+# Автоматическая отправка follow-up сообщения, если собеседник не ответил
+# {секунды: ключ сообщения} — None = выключено (по умолчанию)
+FOLLOW_UP_OPTIONS: dict[int | None, str] = {
+    None: "follow_up_off",
+    21600: "follow_up_6h",      # 6 часов
+    86400: "follow_up_24h",     # 24 часа
 }
 
 # Чаты, полностью игнорируемые ботом (не генерируются черновики и автоответы).

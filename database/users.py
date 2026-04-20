@@ -390,6 +390,31 @@ async def update_chat_prompt(user_id: int, chat_id: int, prompt: str | None) -> 
     )
 
 
+async def update_chat_follow_up(user_id: int, chat_id: int, value: int | None) -> dict | None:
+    """Устанавливает follow-up таймер для конкретного чата (None = сброс на глобальный).
+
+    Args:
+        user_id: ID пользователя
+        chat_id: ID чата
+        value: Секунды follow-up или None для сброса
+
+    Returns:
+        Merged-настройки при успехе, None при ошибке.
+    """
+    user = await get_user(user_id)
+    settings = (user or {}).get("settings") or {}
+    chat_follow_ups = dict(settings.get("chat_follow_ups") or {})
+
+    if value is None:
+        chat_follow_ups.pop(str(chat_id), None)
+    else:
+        chat_follow_ups[str(chat_id)] = value
+
+    return await update_user_settings(
+        user_id, {"chat_follow_ups": chat_follow_ups}, current_settings=settings,
+    )
+
+
 async def get_dashboard_user_stats() -> dict[str, int]:
     """Возвращает статистику пользователей для дашборда.
 

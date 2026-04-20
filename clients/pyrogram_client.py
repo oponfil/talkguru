@@ -8,7 +8,7 @@ from typing import Any, Callable
 
 import pyrogram
 from pyrogram import Client, filters, raw
-from pyrogram.errors import Unauthorized
+from pyrogram.errors import FloodWait, Unauthorized
 from pyrogram.handlers import MessageHandler, RawUpdateHandler
 
 from config import PYROGRAM_API_ID, PYROGRAM_API_HASH, MAX_CONTEXT_MESSAGES, MAX_CONTEXT_CHARS, DEBUG_PRINT, VOICE_TRANSCRIPTION_DELAY, VOICE_TRANSCRIPTION_TIMEOUT, POLL_MISSED_DIALOGS_LIMIT, STICKER_FALLBACK_EMOJI
@@ -664,6 +664,26 @@ _transcription_cache: dict[int, dict[tuple[int, int], str | None]] = defaultdict
 _TRANSCRIPTION_CACHE_MAX = 200  # Макс. записей на пользователя
 
 
+async def _invoke_transcribe(client: Client, peer, msg_id: int, chat_id: int):
+    """Вызывает TranscribeAudio с обработкой FloodWait.
+
+    При FLOOD_WAIT ждёт требуемое Telegram время и повторяет запрос один раз.
+    """
+    try:
+        return await client.invoke(
+            raw.functions.messages.TranscribeAudio(peer=peer, msg_id=msg_id)
+        )
+    except FloodWait as e:
+        print(
+            f"{get_timestamp()} [PYROGRAM] FLOOD_WAIT {e.value}s for TranscribeAudio "
+            f"in chat {chat_id}, waiting..."
+        )
+        await asyncio.sleep(e.value)
+        return await client.invoke(
+            raw.functions.messages.TranscribeAudio(peer=peer, msg_id=msg_id)
+        )
+
+
 async def transcribe_voice(user_id: int, chat_id: int, msg_id: int) -> str | None:
     """Транскрибирует голосовое сообщение через Telegram Premium TranscribeAudio.
 
@@ -692,12 +712,7 @@ async def transcribe_voice(user_id: int, chat_id: int, msg_id: int) -> str | Non
 
     try:
         peer = await client.resolve_peer(chat_id)
-        result = await client.invoke(
-            raw.functions.messages.TranscribeAudio(
-                peer=peer,
-                msg_id=msg_id,
-            )
-        )
+        result = await _invoke_transcribe(client, peer, msg_id, chat_id)
 
         # Если транскрипция готова сразу
         if not result.pending:
@@ -713,12 +728,7 @@ async def transcribe_voice(user_id: int, chat_id: int, msg_id: int) -> str | Non
                 await asyncio.sleep(1)
                 # Повторяем запрос — Telegram вернёт обновлённый результат
                 try:
-                    result = await client.invoke(
-                        raw.functions.messages.TranscribeAudio(
-                            peer=peer,
-                            msg_id=msg_id,
-                        )
-                    )
+                    result = await _invoke_transcribe(client, peer, msg_id, chat_id)
                     if not result.pending:
                         final_text = result.text or ""
                         break

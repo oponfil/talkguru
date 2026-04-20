@@ -3,6 +3,7 @@
 import asyncio
 import random
 from collections import defaultdict
+from datetime import datetime, timezone
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
@@ -117,6 +118,9 @@ async def on_disconnect_confirm_callback(update: Update, context: ContextTypes.D
         msg = await get_system_message(u.language_code, "disconnect_error")
         await context.bot.send_message(chat_id=query.message.chat_id, text=msg)
         return
+
+    # Очищаем in-memory состояние follow-up для этого пользователя
+    _follow_up_done.difference_update({k for k in _follow_up_done if k[0] == u.id})
 
     msg = await get_system_message(u.language_code, "disconnect_success")
     await context.bot.send_message(chat_id=query.message.chat_id, text=msg)
@@ -302,6 +306,9 @@ async def on_pyrogram_message(user_id: int, pyrogram_client_instance, message) -
     if is_chat_ignored(user_settings, chat_id):
         return
 
+    # Входящее сообщение от собеседника — сбрасываем флаг follow-up (anti-loop)
+    _follow_up_done.discard((user_id, chat_id))
+
     if DEBUG_PRINT:
         sender = message.from_user.first_name if message.from_user else "Unknown"
         print(
@@ -326,18 +333,30 @@ async def on_pyrogram_message(user_id: int, pyrogram_client_instance, message) -
         return
 
     _reply_locks[key] = True
+    draft_replaced = False
     try:
+        # Читаем историю чата СНАЧАЛА, до установки черновика!
+        # Если пользователь удалил чат с нашей стороны, история будет пуста.
+        history = await pyrogram_client.read_chat_history(user_id, chat_id)
+        if not history:
+            return
+
+        async def _clear_probe_draft() -> None:
+            if draft_replaced:
+                return
+            _bot_drafts.pop(key, None)
+            _bot_draft_echoes.pop(key, None)
+            try:
+                await pyrogram_client.set_draft(user_id, chat_id, "")
+            except Exception:
+                pass
+
         # Показываем пользователю что бот работает
         style = get_effective_style(user_settings, chat_id)
         style_emoji = STYLE_TO_EMOJI.get(style, "🦉")
         probe_text = (await get_system_message(lang, "draft_typing")).format(emoji=style_emoji)
         _bot_draft_echoes[key] = probe_text
         await pyrogram_client.set_draft(user_id, chat_id, probe_text)
-
-        # Читаем историю чата
-        history = await pyrogram_client.read_chat_history(user_id, chat_id)
-        if not history:
-            return
 
         # Информация об участниках для контекста AI
         opponent = message.from_user
@@ -361,6 +380,7 @@ async def on_pyrogram_message(user_id: int, pyrogram_client_instance, message) -
         tz_offset = user_settings.get("tz_offset", 0) or 0
         reply_text = await generate_reply(history, user, opponent_info, custom_prompt=custom_prompt, style=style, tz_offset=tz_offset, **kwargs)
         if not reply_text or not reply_text.strip():
+            await _clear_probe_draft()
             return
 
         # Устанавливаем черновик с AI-ответом
@@ -369,6 +389,7 @@ async def on_pyrogram_message(user_id: int, pyrogram_client_instance, message) -
         _bot_draft_echoes[key] = ai_text
         await pyrogram_client.set_draft(user_id, chat_id, ai_text)
         _track_replied_chat(user_id, chat_id)
+        draft_replaced = True
 
         print(f"{get_timestamp()} [PYROGRAM] Reply set as draft for user {user_id} in chat {chat_id}")
         dash_stats.record_draft(style)
@@ -379,10 +400,27 @@ async def on_pyrogram_message(user_id: int, pyrogram_client_instance, message) -
 
     except Exception as e:
         print(f"{get_timestamp()} [PYROGRAM] ERROR processing message for user {user_id}: {e}")
+        await _clear_probe_draft()
     finally:
         _reply_locks.pop(key, None)
         if _reply_pending.pop(key, None):
             asyncio.create_task(_regenerate_reply(user_id, chat_id))
+
+async def _extract_opponent_from_history(
+    history: list[dict], user_id: int, chat_id: int,
+) -> dict | None:
+    """Извлекает информацию об оппоненте из истории чата."""
+    for msg in reversed(history):
+        if msg["role"] == "other" and msg.get("name"):
+            return {
+                "first_name": msg.get("name"),
+                "last_name": msg.get("last_name"),
+                "username": msg.get("username"),
+                "bio": await pyrogram_client.get_chat_bio(user_id, chat_id),
+                "phone_number": msg.get("phone_number"),
+            }
+    return None
+
 
 async def _generate_reply_for_chat(
     user_id: int, chat_id: int,
@@ -414,18 +452,7 @@ async def _generate_reply_for_chat(
             await _clear_probe_draft()
             return
 
-        # Определяем оппонента из истории
-        opponent_info = None
-        for msg in reversed(history):
-            if msg["role"] == "other" and msg.get("name"):
-                opponent_info = {
-                    "first_name": msg.get("name"),
-                    "last_name": msg.get("last_name"),
-                    "username": msg.get("username"),
-                    "bio": await pyrogram_client.get_chat_bio(user_id, chat_id),
-                    "phone_number": msg.get("phone_number"),
-                }
-                break
+        opponent_info = await _extract_opponent_from_history(history, user_id, chat_id)
 
         kwargs: dict = {}
         style = get_effective_style(user_settings, chat_id)
@@ -505,18 +532,7 @@ async def _regenerate_reply(user_id: int, chat_id: int) -> None:
         if not history:
             return
 
-        # Извлекаем opponent из последнего входящего сообщения
-        opponent_info = None
-        for msg in reversed(history):
-            if msg["role"] == "other" and msg.get("name"):
-                opponent_info = {
-                    "first_name": msg.get("name"),
-                    "last_name": msg.get("last_name"),
-                    "username": msg.get("username"),
-                    "bio": await pyrogram_client.get_chat_bio(user_id, chat_id),
-                    "phone_number": msg.get("phone_number"),
-                }
-                break
+        opponent_info = await _extract_opponent_from_history(history, user_id, chat_id)
 
         # Генерируем ответ
         kwargs: dict = {}
@@ -577,6 +593,10 @@ _last_seen_msg_id: dict[tuple[int, int], int] = {}
 
 # Чаты, в которых бот реально ответил (set_draft / send_message): {user_id: {chat_id, ...}}
 _replied_chats: dict[int, set[int]] = defaultdict(set)
+
+# Follow-up: чаты, в которых follow-up уже отправлен (anti-loop).
+# Сбрасывается при входящем сообщении от собеседника.
+_follow_up_done: set[tuple[int, int]] = set()
 
 
 def _track_replied_chat(user_id: int, chat_id: int) -> None:
@@ -895,4 +915,111 @@ async def poll_missed_messages(user_id: int) -> int:
         await on_pyrogram_message(user_id, client, msg)
 
     return found
+
+
+async def poll_follow_ups(user_id: int) -> int:
+    """Проверяет чаты пользователя на необходимость отправки follow-up сообщения.
+
+    Алгоритм: если последнее сообщение в чате — наше (исходящее), и прошло больше
+    follow_up секунд, и follow-up ещё не отправлен — генерируем и отправляем.
+
+    Returns:
+        Количество отправленных follow-up сообщений.
+    """
+    if not pyrogram_client.is_active(user_id):
+        return 0
+
+    user = await get_user(user_id)
+    user_settings = (user or {}).get("settings") or {}
+    chat_follow_ups = user_settings.get("chat_follow_ups") or {}
+    if not chat_follow_ups:
+        return 0
+
+    sent = 0
+    for chat_id_str, timer_value in chat_follow_ups.items():
+        try:
+            chat_id = int(chat_id_str)
+        except ValueError:
+            continue
+
+        # 0 = явно OFF
+        if not timer_value or timer_value <= 0:
+            continue
+
+        key = (user_id, chat_id)
+
+        # Anti-loop: уже отправляли follow-up для этого чата
+        if key in _follow_up_done:
+            continue
+
+        # Не мешаем, если идёт генерация или стоит бот-черновик
+        if _reply_locks.get(key) or _bot_drafts.get(key):
+            continue
+
+        # Получаем последнее сообщение в чате
+        msg = await pyrogram_client.get_last_message(user_id, chat_id)
+        if not msg:
+            continue
+
+        # Если последнее сообщение от собеседника — follow-up не нужен
+        if not msg.outgoing:
+            continue
+
+        # Проверяем таймер
+        if not msg.date:
+            continue
+        elapsed = (datetime.now(timezone.utc) - msg.date).total_seconds()
+        if elapsed < timer_value:
+            continue
+
+        # Генерируем follow-up
+        try:
+            history = await pyrogram_client.read_chat_history(user_id, chat_id)
+            if not history:
+                continue
+
+            opponent_info = await _extract_opponent_from_history(history, user_id, chat_id)
+
+            style = get_effective_style(user_settings, chat_id)
+            model = get_effective_model(user_settings, style)
+            custom_prompt = get_effective_prompt(user_settings, chat_id)
+            tz_offset = user_settings.get("tz_offset", 0) or 0
+
+            # AI prompt suffix (не UI-строка) — инструкция для модели по генерации follow-up
+            hours = int(elapsed // 3600)
+            follow_up_instruction = (
+                f"\n\nFOLLOW-UP CONTEXT: The other person has not replied to your last message "
+                f"for {hours} hour(s). Write a short, natural follow-up message to re-engage "
+                f"the conversation. Do NOT repeat or paraphrase your previous message. "
+                f"Be casual and non-desperate."
+            )
+            effective_prompt = (custom_prompt or "") + follow_up_instruction
+
+            kwargs: dict = {}
+            if model:
+                kwargs["model"] = model
+            reply_text = await generate_reply(
+                history, user, opponent_info,
+                custom_prompt=effective_prompt, style=style, tz_offset=tz_offset,
+                **kwargs,
+            )
+            if not reply_text or not reply_text.strip():
+                continue
+
+            # Отправляем сообщение
+            success = await pyrogram_client.send_message(user_id, chat_id, reply_text.strip())
+            if success:
+                _follow_up_done.add(key)
+                _track_replied_chat(user_id, chat_id)
+                sent += 1
+                print(
+                    f"{get_timestamp()} [FOLLOW-UP] Sent follow-up for user {user_id} "
+                    f"in chat {chat_id} (elapsed {hours}h)"
+                )
+                dash_stats.record_draft(style)
+
+        except Exception as e:
+            print(f"{get_timestamp()} [FOLLOW-UP] ERROR for user {user_id} chat {chat_id}: {e}")
+
+    return sent
 

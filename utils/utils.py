@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 from functools import wraps
 from typing import Callable
 
-from config import AUTO_REPLY_OPTIONS, CHAT_IGNORED_SENTINEL, DEFAULT_PRO_MODEL, DEFAULT_STYLE, STYLE_PRO_MODELS
+from config import AUTO_REPLY_OPTIONS, CHAT_IGNORED_SENTINEL, DEFAULT_PRO_MODEL, DEFAULT_STYLE, FOLLOW_UP_OPTIONS, STYLE_PRO_MODELS
 
 
 def get_effective_pro_model(settings: dict) -> bool:
@@ -257,6 +257,31 @@ def get_effective_auto_reply(settings: dict, chat_id: int | None = None) -> int 
             # 0 = явно выключено (OFF), None в JSON невозможен
             return None if per_chat == 0 else normalize_auto_reply(per_chat)
     return normalize_auto_reply(settings.get("auto_reply"))
+
+
+def normalize_follow_up(value: object) -> int | None:
+    """Возвращает валидный follow_up или None (OFF)."""
+    return value if value in FOLLOW_UP_OPTIONS else None
+
+
+def get_effective_follow_up(settings: dict, chat_id: int | None = None) -> int | None:
+    """Возвращает follow_up таймер для конкретного чата (per-chat override → глобальный дефолт).
+
+    Args:
+        settings: Настройки пользователя
+        chat_id: ID чата (None → глобальный follow_up)
+
+    Returns:
+        Секунды follow-up или None (OFF)
+    """
+    if chat_id is not None:
+        chat_follow_ups = settings.get("chat_follow_ups") or {}
+        chat_key = str(chat_id)
+        if chat_key in chat_follow_ups:
+            per_chat = chat_follow_ups[chat_key]
+            # 0 = явно выключено (OFF), None в JSON невозможен
+            return None if per_chat == 0 else normalize_follow_up(per_chat)
+    return normalize_follow_up(settings.get("follow_up"))
 
 
 def is_chat_specifically_ignored(settings: dict, chat_id: int) -> bool:

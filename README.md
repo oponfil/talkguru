@@ -10,7 +10,7 @@ Open-source Telegram bot that drafts replies for you. Try it: [@DraftGuruBot](ht
 2. 🦉 When you receive a private message, the bot automatically drafts a reply right in the input field.
 3. ✏️ Write an instruction in the draft — the bot will rewrite it as soon as you leave the chat.
 
-Auto-replies work in private chats only. Draft instructions work everywhere.
+Auto-replies and follow-ups work in private chats only. Draft instructions work everywhere.
 
 ## Security
 
@@ -90,18 +90,19 @@ By default, `/connect` prompts for a phone number. A button below the message le
 | **Model** (🤖) | AI mode: FREE (Gemini 3.1 Flash Lite) or PRO. In PRO mode, the model is selected by communication style: GPT-5.4 for most styles, Gemini 3.1 Pro Preview for seducer. | PRO |
 | **Prompt** (📝) | Custom prompt: describe your persona and add instructions (max 600 chars). The AI uses this to build a *USER PROFILE & CUSTOM INSTRUCTIONS* block. **We recommend adding a self-description** — gender, age, occupation, and texting habits — so the AI mimics your style more accurately. Example: "I'm a 28 y/o guy, designer. I text short, 1–2 sentences, never use periods at the end. I swear a lot and use stickers." Applied to all chats. Applied to drafts and auto-replies. | ❌ OFF |
 | **Style** (🦉/🍻/💕/💼/💰/🕵️/😈) | Communication style: Userlike, Friend, Romance, Business, Sales, Paranoid, Seducer. Sets the tone and manner of replies (including direct bot chat). | 🦉 Userlike |
-| **Auto-reply** (⏰) | Auto-reply timer. If the user doesn't send the draft within the specified time, the bot sends the message itself. Options: OFF, 🔇 Ignore, 1 min, 5 min, 15 min, 1 hour, 16 hours. **Ignore** disables drafts and auto-replies by default for all chats, but any per-chat override in `/chats` still takes priority. Actual delay: from base to 2×base (e.g. 16 h → 16–32 h, avg 24 h). | OFF |
+| **Auto-reply** (⏰) | Auto-reply timer. If the user doesn't send the draft within the specified time, the bot sends the message itself. Options: OFF, 🔇 Ignore, 1 min, 15 min, 16 hours. **Ignore** disables drafts, auto-replies, and follow-ups by default for all chats, but any per-chat override in `/chats` still takes priority. Actual delay: from base to 2×base (e.g. 16 h → 16–32 h, avg 24 h). | OFF |
 | **Timezone** (🕐) | User timezone. The button shows the current time — tap to cycle through 30 popular UTC offsets (including +3:30, +4:30, +5:30, +9:30). Affects message timestamps in AI context. | UTC0 |
 
 ### Per-chat Settings (`/chats`)
 
 The `/chats` command shows recent chats, prioritizing chats with per-chat auto-reply overrides first, then chats where the bot has replied or where custom per-chat settings already exist. Each chat is shown as a single button with the chat name.
 
-Tapping a chat opens a **new message** with three vertical buttons:
+Tapping a chat opens a **new message** with four vertical buttons:
 
 - **Style** (`🦉 Style: Userlike`) — tap to cycle through styles
 - **Prompt** (`📝 Prompt: ✅ ON`) — tap to open the prompt editor for this chat. Shows the current prompt and lets you set a new one, clear it, or cancel. Per-chat prompt is appended to the global prompt (max 300 chars).
-- **Auto-reply** (`⏰ Auto-reply: ✅ OFF`) — tap to cycle through auto-reply timers for this chat. The second option in the cycle is **🔇 Ignore** — fully disables drafts, auto-replies, and message polling for that chat.
+- **Auto-reply** (`⏰ Auto-reply: ✅ OFF`) — tap to cycle through auto-reply timers for this chat. The second option in the cycle is **🔇 Ignore** — fully disables drafts, auto-replies, follow-ups, and message polling for that chat.
+- **Follow-up** (`🔄 Follow-up: ✅ OFF`) — tap to cycle through follow-up timers (6 hours, 24 hours). If enabled, and the contact doesn't reply to your last message within the specified time, the bot automatically generates and **sends** a natural re-engagement message.
 
 Per-chat settings override the global ones from `/settings`. If a per-chat value matches the global one, the override is automatically cleared. Available only to connected users.
 

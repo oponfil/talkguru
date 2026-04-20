@@ -101,11 +101,16 @@ SYSTEM_MESSAGES = {
     "auto_reply_prefix": "⏰ Auto-reply:",
     "auto_reply_off": "✅ OFF",
     "auto_reply_1m": "⚠️ 1 min",
-    "auto_reply_5m": "⚠️ 5 min",
     "auto_reply_15m": "⚠️ 15 min",
-    "auto_reply_1h": "⚠️ 1 hour",
     "auto_reply_16h": "⚠️ 16 hours",
     "auto_reply_ignore": "🔇 Ignore",
+
+    # — Follow-up labels (base, without prefix) —
+    "follow_up_prefix": "🔄 Follow-up:",
+    "follow_up_off": "✅ OFF",
+    "follow_up_6h": "⚠️ 6 hours",
+    "follow_up_24h": "⚠️ 24 hours",
+
     "settings_timezone_back": "🕐 Time",
 
     # — Settings: Style — (генерируется из EMOJI_TO_STYLE)

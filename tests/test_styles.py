@@ -8,6 +8,7 @@ import pytest
 from config import EMOJI_TO_STYLE, STYLE_TO_EMOJI
 from utils.utils import (
     get_effective_auto_reply,
+    get_effective_follow_up,
     get_effective_prompt,
     get_effective_style,
     is_chat_ignored,
@@ -18,6 +19,7 @@ from handlers.styles_handler import (
     _chat_display_name,
     _build_styles_keyboard,
     _build_chat_settings_keyboard,
+    _follow_up_label,
     _style_emoji,
 )
 
@@ -35,6 +37,10 @@ CHAT_MESSAGES = {
     "auto_reply_16h": "⚠️ 16 hours",
     "auto_reply_ignore": "🔇 Ignore",
     "auto_reply_prefix": "⏰ Auto-reply:",
+    "follow_up_off": "✅ OFF",
+    "follow_up_6h": "⚠️ 6 hours",
+    "follow_up_24h": "⚠️ 24 hours",
+    "follow_up_prefix": "🔄 Follow-up:",
     "prompt_cancel": "❌ Cancel",
     "prompt_clear": "🗑 Clear",
     # Стили из settings
@@ -104,12 +110,12 @@ class TestGetEffectiveAutoReply:
 
     def test_per_chat_override(self):
         """Per-chat auto_reply переопределяет глобальный."""
-        settings = {"auto_reply": 60, "chat_auto_replies": {"100": 300}}
-        assert get_effective_auto_reply(settings, chat_id=100) == 300
+        settings = {"auto_reply": 60, "chat_auto_replies": {"100": 900}}
+        assert get_effective_auto_reply(settings, chat_id=100) == 900
 
     def test_per_chat_fallback(self):
         """Если для чата нет override — используем глобальный."""
-        settings = {"auto_reply": 60, "chat_auto_replies": {"100": 300}}
+        settings = {"auto_reply": 60, "chat_auto_replies": {"100": 900}}
         assert get_effective_auto_reply(settings, chat_id=999) == 60
 
     def test_per_chat_invalid_falls_back(self):
@@ -119,18 +125,62 @@ class TestGetEffectiveAutoReply:
 
     def test_empty_chat_auto_replies(self):
         """Пустой chat_auto_replies → глобальный."""
-        settings = {"auto_reply": 300, "chat_auto_replies": {}}
-        assert get_effective_auto_reply(settings, chat_id=100) == 300
+        settings = {"auto_reply": 900, "chat_auto_replies": {}}
+        assert get_effective_auto_reply(settings, chat_id=100) == 900
 
     def test_chat_id_none_returns_global(self):
         """chat_id=None → глобальный auto_reply."""
-        settings = {"auto_reply": 60, "chat_auto_replies": {"100": 300}}
+        settings = {"auto_reply": 60, "chat_auto_replies": {"100": 900}}
         assert get_effective_auto_reply(settings, chat_id=None) == 60
 
     def test_per_chat_ignored(self):
         """Сентинел -1 → возвращается как есть."""
         settings = {"auto_reply": 60, "chat_auto_replies": {"100": -1}}
         assert get_effective_auto_reply(settings, chat_id=100) == -1
+
+
+# ====== get_effective_follow_up ======
+
+class TestGetEffectiveFollowUp:
+    """Тесты для get_effective_follow_up()."""
+
+    def test_global_default(self):
+        """Без chat_id — глобальный follow_up."""
+        assert get_effective_follow_up({"follow_up": 21600}) == 21600
+
+    def test_global_none(self):
+        """Без follow_up — None (OFF)."""
+        assert get_effective_follow_up({}) is None
+
+    def test_per_chat_override(self):
+        """Per-chat follow_up переопределяет глобальный."""
+        settings = {"follow_up": 21600, "chat_follow_ups": {"100": 86400}}
+        assert get_effective_follow_up(settings, chat_id=100) == 86400
+
+    def test_per_chat_fallback(self):
+        """Если для чата нет override — используем глобальный."""
+        settings = {"follow_up": 21600, "chat_follow_ups": {"100": 86400}}
+        assert get_effective_follow_up(settings, chat_id=999) == 21600
+
+    def test_per_chat_zero_is_off(self):
+        """Per-chat 0 = явно OFF."""
+        settings = {"follow_up": 21600, "chat_follow_ups": {"100": 0}}
+        assert get_effective_follow_up(settings, chat_id=100) is None
+
+    def test_per_chat_invalid_falls_back(self):
+        """Невалидный per-chat follow_up → None."""
+        settings = {"follow_up": 21600, "chat_follow_ups": {"100": 99999}}
+        assert get_effective_follow_up(settings, chat_id=100) is None
+
+    def test_empty_chat_follow_ups(self):
+        """Пустой chat_follow_ups → глобальный."""
+        settings = {"follow_up": 86400, "chat_follow_ups": {}}
+        assert get_effective_follow_up(settings, chat_id=100) == 86400
+
+    def test_chat_id_none_returns_global(self):
+        """chat_id=None → глобальный follow_up."""
+        settings = {"follow_up": 21600, "chat_follow_ups": {"100": 86400}}
+        assert get_effective_follow_up(settings, chat_id=None) == 21600
 
 
 class TestIsChatIgnored:
@@ -246,14 +296,26 @@ class TestStylesHelpers:
 
     def test_auto_reply_label_minutes(self):
         assert _auto_reply_label(60, CHAT_MESSAGES) == "⏰ Auto-reply: ⚠️ 1 min"
-        assert _auto_reply_label(300, CHAT_MESSAGES) == "⏰ Auto-reply: ⚠️ 5 min"
+        assert _auto_reply_label(900, CHAT_MESSAGES) == "⏰ Auto-reply: ⚠️ 15 min"
 
     def test_auto_reply_label_hours(self):
-        assert _auto_reply_label(3600, CHAT_MESSAGES) == "⏰ Auto-reply: ⚠️ 1 hour"
         assert _auto_reply_label(57600, CHAT_MESSAGES) == "⏰ Auto-reply: ⚠️ 16 hours"
 
     def test_auto_reply_label_ignore(self):
         assert _auto_reply_label(-1, CHAT_MESSAGES) == "🔇 Ignore"
+
+    def test_follow_up_label_off(self):
+        assert _follow_up_label(None, CHAT_MESSAGES) == "🔄 Follow-up: ✅ OFF"
+
+    def test_follow_up_label_6h(self):
+        assert _follow_up_label(21600, CHAT_MESSAGES) == "🔄 Follow-up: ⚠️ 6 hours"
+
+    def test_follow_up_label_24h(self):
+        assert _follow_up_label(86400, CHAT_MESSAGES) == "🔄 Follow-up: ⚠️ 24 hours"
+
+    def test_follow_up_label_unknown(self):
+        """Неизвестный таймер → fallback на OFF."""
+        assert _follow_up_label(99999, CHAT_MESSAGES) == "🔄 Follow-up: ✅ OFF"
 
     def test_chat_display_name_full(self):
         assert _chat_display_name({"first_name": "Алиса", "last_name": "Б.", "title": ""}) == "Алиса Б."
@@ -334,8 +396,8 @@ class TestStylesHelpers:
 
         assert [dialog["chat_id"] for dialog in dialogs] == [300, 100, 400, 200]
 
-    def test_build_chat_settings_keyboard_three_buttons_column(self):
-        """Level 2: три кнопки в столбец — стиль, промпт, автоответ."""
+    def test_build_chat_settings_keyboard_four_buttons_column(self):
+        """Level 2: четыре кнопки в столбец — стиль, промпт, автоответ, follow-up."""
         user_settings = {
             "style": "business",
             "chat_styles": {"100": "romance"},
@@ -344,11 +406,12 @@ class TestStylesHelpers:
         }
         keyboard = _build_chat_settings_keyboard(100, user_settings, CHAT_MESSAGES, global_style="business")
         buttons = keyboard.inline_keyboard
-        assert len(buttons) == 3
+        assert len(buttons) == 4
         # Каждая строка — 1 кнопка
         assert len(buttons[0]) == 1  # Style
         assert len(buttons[1]) == 1  # Prompt
         assert len(buttons[2]) == 1  # Auto-reply
+        assert len(buttons[3]) == 1  # Follow-up
         # Style — romance override
         assert "romance" in buttons[0][0].text.lower() or "💕" in buttons[0][0].text
         assert buttons[0][0].callback_data == "chats:100"
@@ -364,7 +427,7 @@ class TestStylesHelpers:
         user_settings = {"style": "userlike"}
         keyboard = _build_chat_settings_keyboard(100, user_settings, CHAT_MESSAGES, global_style="userlike")
         buttons = keyboard.inline_keyboard
-        assert len(buttons) == 3
+        assert len(buttons) == 4
         # Prompt — empty
         assert buttons[1][0].text == "📝 Prompt: ❌ OFF"
         # Auto-reply — off
@@ -559,7 +622,7 @@ class TestOnStyles:
         assert call_kwargs["chat_id"] == 42
         assert "Алиса" in call_kwargs["text"]
         kb = call_kwargs["reply_markup"]
-        assert len(kb.inline_keyboard) == 3  # 3 кнопки в столбец
+        assert len(kb.inline_keyboard) == 4  # 4 кнопки в столбец
         # Не вызван edit_message_text
         mock_query.edit_message_text.assert_not_called()
 
@@ -589,8 +652,8 @@ class TestOnStyles:
         mock_query.edit_message_text.assert_called_once()
         call_kwargs = mock_query.edit_message_text.call_args.kwargs
         kb = call_kwargs["reply_markup"]
-        # Level 2: 3 кнопки в столбец
-        assert len(kb.inline_keyboard) == 3
+        # Level 2: 4 кнопки в столбец
+        assert len(kb.inline_keyboard) == 4
         assert "awaiting_prompt" not in mock_context.user_data
         assert "awaiting_chat_prompt" not in mock_context.user_data
 
@@ -649,8 +712,8 @@ class TestOnStyles:
         mock_query.edit_message_text.assert_called_once()
         call_kwargs = mock_query.edit_message_text.call_args.kwargs
         kb = call_kwargs["reply_markup"]
-        # Level 2: 3 кнопки в столбец
-        assert len(kb.inline_keyboard) == 3
+        # Level 2: 4 кнопки в столбец
+        assert len(kb.inline_keyboard) == 4
         assert "awaiting_prompt" not in mock_context.user_data
         assert "awaiting_chat_prompt" not in mock_context.user_data
 
@@ -680,6 +743,60 @@ class TestOnStyles:
             await on_auto_reply_callback(mock_update, mock_context)
 
         mock_update_ar.assert_called_once_with(mock_update.effective_user.id, 100, None)
+
+    @pytest.mark.asyncio
+    async def test_follow_up_callback_cycles(self, mock_update, mock_context):
+        """Нажатие на кнопку follow-up циклически переключает таймер."""
+        mock_query = AsyncMock()
+        mock_query.data = "followup:100"
+        mock_query.answer = AsyncMock()
+        mock_query.edit_message_text = AsyncMock()
+        mock_update.callback_query = mock_query
+
+        initial_settings = {"follow_up": None, "chat_follow_ups": {}}
+        updated_settings = {"follow_up": None, "chat_follow_ups": {"100": 21600}}
+        mock_context.user_data["chats_dialogs"] = [
+            {"chat_id": 100, "first_name": "Алиса", "last_name": "", "username": ""},
+        ]
+
+        with patch("handlers.styles_handler.get_user", new_callable=AsyncMock, return_value={"settings": initial_settings}), \
+             patch("handlers.styles_handler.update_chat_follow_up", new_callable=AsyncMock, return_value=updated_settings), \
+             patch("handlers.styles_handler.get_system_messages", new_callable=AsyncMock, return_value=CHAT_MESSAGES):
+            from handlers.styles_handler import on_follow_up_callback
+            await on_follow_up_callback(mock_update, mock_context)
+
+        mock_query.edit_message_text.assert_called_once()
+        call_kwargs = mock_query.edit_message_text.call_args.kwargs
+        kb = call_kwargs["reply_markup"]
+        # Level 2: 4 кнопки в столбец
+        assert len(kb.inline_keyboard) == 4
+
+    @pytest.mark.asyncio
+    async def test_follow_up_callback_resets(self, mock_update, mock_context):
+        """Follow-up, совпадающий с глобальным, сбрасывает per-chat (передаёт None)."""
+        mock_query = AsyncMock()
+        mock_query.data = "followup:100"
+        mock_update.callback_query = mock_query
+
+        from config import FOLLOW_UP_OPTIONS
+        options_list = list(FOLLOW_UP_OPTIONS.keys())
+
+        # Глобальный = последний в карусели, per-chat = предпоследний
+        global_fu = options_list[-1]
+        prev_fu = options_list[-2]
+
+        initial_settings = {"follow_up": global_fu, "chat_follow_ups": {"100": prev_fu}}
+        mock_context.user_data["chats_dialogs"] = [
+            {"chat_id": 100, "first_name": "Алиса", "last_name": "", "username": ""},
+        ]
+
+        with patch("handlers.styles_handler.get_user", new_callable=AsyncMock, return_value={"settings": initial_settings}), \
+             patch("handlers.styles_handler.update_chat_follow_up", new_callable=AsyncMock, return_value={"chat_follow_ups": {}}) as mock_update_fu, \
+             patch("handlers.styles_handler.get_system_messages", new_callable=AsyncMock, return_value=CHAT_MESSAGES):
+            from handlers.styles_handler import on_follow_up_callback
+            await on_follow_up_callback(mock_update, mock_context)
+
+        mock_update_fu.assert_called_once_with(mock_update.effective_user.id, 100, None)
 
 
 # ====== update_chat_style ======
@@ -742,6 +859,37 @@ class TestUpdateChatAutoReply:
         call_args = mock_update.call_args
         assert "100" not in call_args[0][1]["chat_auto_replies"]
         assert call_args[0][1]["chat_auto_replies"]["200"] == 300
+
+
+# ====== update_chat_follow_up ======
+
+class TestUpdateChatFollowUp:
+    """Тесты для update_chat_follow_up()."""
+
+    @pytest.mark.asyncio
+    async def test_sets_per_chat_follow_up(self):
+        """Устанавливает follow_up для конкретного чата."""
+        with patch("database.users.get_user", new_callable=AsyncMock, return_value={"settings": {}}), \
+             patch("database.users.update_user_settings", new_callable=AsyncMock, return_value={"chat_follow_ups": {"100": 21600}}) as mock_update:
+            from database.users import update_chat_follow_up
+            await update_chat_follow_up(123, 100, 21600)
+
+        mock_update.assert_called_once()
+        call_args = mock_update.call_args
+        assert call_args[0][1]["chat_follow_ups"]["100"] == 21600
+
+    @pytest.mark.asyncio
+    async def test_resets_per_chat_follow_up(self):
+        """None → удаляет per-chat follow_up."""
+        existing = {"settings": {"chat_follow_ups": {"100": 21600, "200": 86400}}}
+        with patch("database.users.get_user", new_callable=AsyncMock, return_value=existing), \
+             patch("database.users.update_user_settings", new_callable=AsyncMock, return_value={"chat_follow_ups": {"200": 86400}}) as mock_update:
+            from database.users import update_chat_follow_up
+            await update_chat_follow_up(123, 100, None)
+
+        call_args = mock_update.call_args
+        assert "100" not in call_args[0][1]["chat_follow_ups"]
+        assert call_args[0][1]["chat_follow_ups"]["200"] == 86400
 
 
 # ====== get_effective_prompt ======
@@ -940,8 +1088,8 @@ class TestOnChatPromptCallback:
 
         call_kwargs = mock_query.edit_message_text.call_args.kwargs
         kb = call_kwargs["reply_markup"]
-        # Возвращает на Level 2 (3 кнопки в столбец)
-        assert len(kb.inline_keyboard) == 3
+        # Возвращает на Level 2 (4 кнопки в столбец)
+        assert len(kb.inline_keyboard) == 4
         assert "awaiting_prompt" not in mock_context.user_data
         assert "awaiting_chat_prompt" not in mock_context.user_data
 
@@ -967,7 +1115,7 @@ class TestOnChatPromptCallback:
 
         call_kwargs = mock_query.edit_message_text.call_args.kwargs
         kb = call_kwargs["reply_markup"]
-        # Возвращает на Level 2 (3 кнопки в столбец)
-        assert len(kb.inline_keyboard) == 3
+        # Возвращает на Level 2 (4 кнопки в столбец)
+        assert len(kb.inline_keyboard) == 4
         assert "awaiting_prompt" not in mock_context.user_data
         assert "awaiting_chat_prompt" not in mock_context.user_data

@@ -21,7 +21,7 @@ from telegram.ext import (  # noqa: E402
     ContextTypes, filters,
 )
 
-from config import BOT_TOKEN, BOT_READ_TIMEOUT, POLL_MISSED_INTERVAL, DEBUG_PRINT  # noqa: E402
+from config import BOT_TOKEN, BOT_READ_TIMEOUT, FOLLOW_UP_OPTIONS, POLL_MISSED_INTERVAL, DEBUG_PRINT  # noqa: E402
 from utils.utils import get_timestamp  # noqa: E402
 from clients import pyrogram_client  # noqa: E402
 from handlers.bot_handlers import on_start, on_start_connect_callback, on_text  # noqa: E402
@@ -29,7 +29,7 @@ from handlers.pyrogram_handlers import (  # noqa: E402
     on_disconnect, on_status,
     on_disconnect_confirm_callback, on_disconnect_cancel_callback,
     on_pyrogram_message, on_pyrogram_draft,
-    poll_missed_messages,
+    poll_follow_ups, poll_missed_messages,
 )
 from handlers.connect_handler import (  # noqa: E402
     on_connect, handle_connect_text,
@@ -42,6 +42,7 @@ from handlers.styles_handler import (  # noqa: E402
     on_auto_reply_callback, on_chat_menu_callback, on_chat_prompt_callback,
     on_chat_prompt_cancel_callback,
     on_chat_prompt_clear_callback, on_chats, on_chats_callback, on_chats_more_callback,
+    on_follow_up_callback,
 )
 from utils.pyrogram_utils import restore_sessions  # noqa: E402
 
@@ -110,6 +111,7 @@ def main() -> None:
     app.add_handler(CallbackQueryHandler(on_chat_prompt_callback, pattern=r"^chatprompt:"))
     app.add_handler(CallbackQueryHandler(on_chat_prompt_cancel_callback, pattern=r"^chatprompt_cancel:"))
     app.add_handler(CallbackQueryHandler(on_chat_prompt_clear_callback, pattern=r"^chatprompt_clear:"))
+    app.add_handler(CallbackQueryHandler(on_follow_up_callback, pattern=r"^followup:"))
     app.add_handler(CommandHandler("status", on_status, filters=PRIVATE_ONLY_FILTER))
     app.add_handler(CommandHandler("disconnect", on_disconnect, filters=PRIVATE_ONLY_FILTER))
     app.add_handler(CallbackQueryHandler(on_disconnect_confirm_callback, pattern=r"^disconnect:confirm$"))
@@ -144,8 +146,9 @@ async def post_init(app: Application) -> None:
     await restore_sessions(app)
 
     # Запускаем фоновый polling пропущенных сообщений
-    global _poll_task
+    global _poll_task, _follow_up_task
     _poll_task = asyncio.create_task(_poll_missed_loop())
+    _follow_up_task = asyncio.create_task(_poll_follow_ups_loop())
 
     # Запускаем dashboard HTTP-сервер (необязательная подсистема)
     global _dashboard_runner
@@ -158,6 +161,7 @@ async def post_init(app: Application) -> None:
 
 
 _poll_task: asyncio.Task | None = None
+_follow_up_task: asyncio.Task | None = None
 _dashboard_runner = None
 
 
@@ -173,6 +177,23 @@ async def _poll_missed_loop() -> None:
                     print(f"{get_timestamp()} [POLL] Found {found} missed message(s) for user {user_id}")
         except Exception as e:
             print(f"{get_timestamp()} [POLL] ERROR: {e}")
+
+
+async def _poll_follow_ups_loop() -> None:
+    """Фоновый цикл проверки follow-up сообщений для всех активных пользователей."""
+    # Узнаем минимальный интервал из FOLLOW_UP_OPTIONS (отфильтровываем None и 0)
+    valid_intervals = [k for k in FOLLOW_UP_OPTIONS.keys() if k is not None and k > 0]
+    poll_interval = min(valid_intervals) if valid_intervals else 7200
+    while True:
+        try:
+            active_users = pyrogram_client.get_active_user_ids()
+            for user_id in active_users:
+                sent = await poll_follow_ups(user_id)
+                if sent and DEBUG_PRINT:
+                    print(f"{get_timestamp()} [FOLLOW-UP] Sent {sent} follow-up(s) for user {user_id}")
+        except Exception as e:
+            print(f"{get_timestamp()} [FOLLOW-UP] ERROR: {e}")
+        await asyncio.sleep(poll_interval)
 
 
 if __name__ == "__main__":

@@ -13,19 +13,22 @@ from config import (
     CHATS_FETCH_LIMIT,
     DEBUG_PRINT,
     DEFAULT_STYLE,
+    FOLLOW_UP_OPTIONS,
     STYLE_OPTIONS,
     STYLE_TO_EMOJI,
 )
 from dashboard import stats as dash_stats
-from database.users import get_user, update_chat_auto_reply, update_chat_prompt, update_chat_style, update_last_msg_at
+from database.users import get_user, update_chat_auto_reply, update_chat_follow_up, update_chat_prompt, update_chat_style, update_last_msg_at
 from handlers.pyrogram_handlers import get_replied_chats
 from system_messages import get_system_message, get_system_messages
 from handlers.connect_handler import clear_pending_input
 from utils.utils import (
     get_effective_auto_reply,
+    get_effective_follow_up,
     get_effective_style,
     get_timestamp,
     normalize_auto_reply,
+    normalize_follow_up,
     serialize_user_updates,
     typing_action,
 )
@@ -45,6 +48,14 @@ def _auto_reply_label(seconds: int | None, messages: dict) -> str:
         return ar_base or "🔇"
     ar_prefix = messages.get("auto_reply_prefix", "⏰ Auto-reply:")
     return f"{ar_prefix} {ar_base}" if ar_base else "⏰"
+
+
+def _follow_up_label(seconds: int | None, messages: dict) -> str:
+    """Формирует локализованную метку таймера follow-up для /chats."""
+    fu_key = FOLLOW_UP_OPTIONS.get(seconds, "follow_up_off")
+    fu_base = messages.get(fu_key, "")
+    fu_prefix = messages.get("follow_up_prefix", "🔄 Follow-up:")
+    return f"{fu_prefix} {fu_base}" if fu_base else "🔄"
 
 
 def _chat_display_name(dialog_info: dict) -> str:
@@ -79,6 +90,7 @@ def _build_styles_keyboard(
     chat_styles = user_settings.get("chat_styles") or {}
     chat_prompts = user_settings.get("chat_prompts") or {}
     chat_auto_replies = user_settings.get("chat_auto_replies") or {}
+    chat_follow_ups = user_settings.get("chat_follow_ups") or {}
 
     keyboard = []
     if visible_count is None:
@@ -101,6 +113,10 @@ def _build_styles_keyboard(
             icons += "🔇"
         elif ar_override and ar_override > 0:
             icons += "⏰"
+
+        # Follow-up индикатор
+        if chat_follow_ups.get(str(chat_id)):
+            icons += "🔄"
 
         label = f"{icons} | {name}" if icons else name
         btn = InlineKeyboardButton(label, callback_data=f"chatmenu:{chat_id}")
@@ -143,10 +159,15 @@ def _build_chat_settings_keyboard(
     auto_reply = get_effective_auto_reply(user_settings, chat_id)
     ar_label = _auto_reply_label(auto_reply, messages)
 
+    # Follow-up
+    follow_up = get_effective_follow_up(user_settings, chat_id)
+    fu_label = _follow_up_label(follow_up, messages)
+
     keyboard = [
         [InlineKeyboardButton(style_label, callback_data=f"chats:{chat_id}")],
         [InlineKeyboardButton(prompt_label, callback_data=f"chatprompt:{chat_id}")],
         [InlineKeyboardButton(ar_label, callback_data=f"autoreply:{chat_id}")],
+        [InlineKeyboardButton(fu_label, callback_data=f"followup:{chat_id}")],
     ]
     return InlineKeyboardMarkup(keyboard)
 
@@ -467,3 +488,54 @@ async def on_chat_prompt_clear_callback(update: Update, context: ContextTypes.DE
 
     if DEBUG_PRINT:
         print(f"{get_timestamp()} [BOT] Chat prompt cleared for chat {chat_id} by user {u.id}")
+
+
+@serialize_user_updates
+async def on_follow_up_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Обработчик нажатия кнопки follow-up — циклическое переключение таймера для чата."""
+    query = update.callback_query
+    u = update.effective_user
+    await query.answer()
+    await clear_pending_input(context, u.id, context.bot)
+
+    # Извлекаем chat_id из callback_data "followup:123456"
+    try:
+        chat_id = int(query.data.split(":")[1])
+    except (IndexError, ValueError):
+        return
+
+    # Читаем текущие настройки
+    user = await get_user(u.id)
+    user_settings = (user or {}).get("settings") or {}
+
+    # Текущий follow_up для этого чата
+    current = get_effective_follow_up(user_settings, chat_id)
+
+    # Глобальный follow_up
+    global_follow_up = normalize_follow_up(user_settings.get("follow_up"))
+
+    # Циклически переключаем
+    options = list(FOLLOW_UP_OPTIONS)
+    idx = options.index(current) if current in options else 0
+    next_value = options[(idx + 1) % len(options)]
+
+    # Если совпадает с глобальным — сбрасываем per-chat override (= None).
+    # Иначе сохраняем: для OFF используем 0 (sentinel), т.к. None = сброс.
+    if next_value == global_follow_up:
+        override_value = None
+    elif next_value is None:
+        override_value = 0  # 0 = явно OFF
+    else:
+        override_value = next_value
+
+    # Сохраняем
+    updated_settings = await update_chat_follow_up(u.id, chat_id, override_value)
+    if updated_settings is None:
+        error_msg = await get_system_message(u.language_code, "error")
+        await query.edit_message_text(text=error_msg)
+        return
+
+    await _refresh_chat_settings(query, u, context, chat_id, updated_settings)
+
+    if DEBUG_PRINT:
+        print(f"{get_timestamp()} [BOT] Follow-up for chat {chat_id} changed to {next_value!r} by user {u.id}")
