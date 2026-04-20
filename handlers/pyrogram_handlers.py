@@ -972,7 +972,8 @@ async def poll_follow_ups(user_id: int) -> int:
         # Проверяем таймер
         if not msg.date:
             continue
-        elapsed = (datetime.now(timezone.utc) - msg.date).total_seconds()
+        msg_date = msg.date.astimezone(timezone.utc) if msg.date.tzinfo else msg.date.replace(tzinfo=timezone.utc)
+        elapsed = (datetime.now(timezone.utc) - msg_date).total_seconds()
         if elapsed < timer_value:
             continue
 

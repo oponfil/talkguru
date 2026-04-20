@@ -302,7 +302,11 @@ async def read_chat_history(user_id: int, chat_id: int, limit: int = MAX_CONTEXT
             print(f"{get_timestamp()} [PYROGRAM] Read {len(messages)} messages from chat {chat_id}")
 
     except Exception as e:
-        print(f"{get_timestamp()} [PYROGRAM] ERROR reading chat {chat_id} for user {user_id}: {e}")
+        if "PEER_ID_INVALID" in str(e):
+            if DEBUG_PRINT:
+                print(f"{get_timestamp()} [PYROGRAM] WARNING reading chat {chat_id} for user {user_id}: {e}")
+        else:
+            print(f"{get_timestamp()} [PYROGRAM] ERROR reading chat {chat_id} for user {user_id}: {e}")
 
     return messages
 
@@ -444,7 +448,11 @@ async def get_last_incoming(user_id: int, chat_id: int) -> "pyrogram.types.Messa
                 return msg
             return None  # последнее сообщение — исходящее
     except Exception as e:
-        print(f"{get_timestamp()} [PYROGRAM] ERROR get_last_incoming for user {user_id} chat {chat_id}: {e}")
+        if "PEER_ID_INVALID" in str(e):
+            if DEBUG_PRINT:
+                print(f"{get_timestamp()} [PYROGRAM] WARNING get_last_incoming for user {user_id} chat {chat_id}: {e}")
+        else:
+            print(f"{get_timestamp()} [PYROGRAM] ERROR get_last_incoming for user {user_id} chat {chat_id}: {e}")
 
     return None
 
@@ -465,7 +473,11 @@ async def get_last_message(user_id: int, chat_id: int) -> "pyrogram.types.Messag
         async for msg in client.get_chat_history(chat_id, limit=1):
             return msg
     except Exception as e:
-        print(f"{get_timestamp()} [PYROGRAM] ERROR get_last_message for user {user_id} chat {chat_id}: {e}")
+        if "PEER_ID_INVALID" in str(e):
+            if DEBUG_PRINT:
+                print(f"{get_timestamp()} [PYROGRAM] WARNING get_last_message for user {user_id} chat {chat_id}: {e}")
+        else:
+            print(f"{get_timestamp()} [PYROGRAM] ERROR get_last_message for user {user_id} chat {chat_id}: {e}")
 
     return None
 
