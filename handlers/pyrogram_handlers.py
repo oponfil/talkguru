@@ -653,6 +653,10 @@ async def _auto_reply_worker(user_id: int, chat_id: int, text: str, base_seconds
             _track_replied_chat(user_id, chat_id)
             _bot_drafts.pop(key, None)
             _bot_draft_echoes.pop(key, None)
+            try:
+                await pyrogram_client.set_draft(user_id, chat_id, "")
+            except Exception:
+                pass
             print(f"{get_timestamp()} [AUTO-REPLY] Sent for user {user_id} in chat {chat_id} after {delay:.0f}s")
             dash_stats.record_auto_reply()
 
@@ -674,7 +678,7 @@ async def on_pyrogram_draft(user_id: int, chat_id: int, draft_text: str) -> None
 
     # Игнорируем черновики, установленные ботом (пробел или AI-ответ)
     bot_echo_text = _bot_draft_echoes.get(key)
-    if bot_echo_text is not None and draft_text == bot_echo_text:
+    if (bot_echo_text is not None and draft_text == bot_echo_text) or draft_text == _bot_drafts.get(key):
         _bot_draft_echoes.pop(key, None)
         return
 
