@@ -13,7 +13,6 @@ from handlers.pyrogram_handlers import (
     _maybe_schedule_auto_reply,
     _pending_drafts,
     _processed_incoming_ids,
-    _regenerate_reply,
     _reply_locks,
     _reply_pending,
     on_disconnect, on_disconnect_confirm_callback, on_disconnect_cancel_callback,
@@ -520,6 +519,9 @@ class TestOnPyrogramMessage:
         """Голосовое сообщение → транскрипция → черновик."""
         message = MagicMock()
         message.text = None
+        message.caption = None
+        message.sticker = None
+        message.photo = None
         message.voice = MagicMock()  # есть голосовое
         message.id = 42
         message.date = "2026-03-15T10:00:00Z"
@@ -689,8 +691,8 @@ class TestOnPyrogramMessage:
         assert _reply_locks[(123, 456)] is True
 
     @pytest.mark.asyncio
-    async def test_pending_message_triggers_regeneration_after_lock_release(self):
-        """После генерации с pending-флагом запускается _regenerate_reply."""
+    async def test_pending_message_triggers_regeneration_loop(self):
+        """Pending-флаг во время генерации → цикл перегенерирует (generate_reply вызван дважды)."""
         message = MagicMock()
         message.text = "Hello"
         message.outgoing = False
@@ -701,36 +703,39 @@ class TestOnPyrogramMessage:
         message.chat.id = 456
         message.chat.type = MagicMock(value="private")
 
-        # Ставим pending-флаг до вызова (имитация: второе сообщение пришло)
-        _reply_pending[(123, 456)] = True
+        call_count = 0
+
+        async def _gen_side_effect(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                # Имитируем: новое сообщение пришло во время первой генерации
+                _reply_pending[(123, 456)] = True
+            return "Hi there!"
 
         with patch("handlers.pyrogram_handlers.pyrogram_client") as mock_pc, \
-             patch("handlers.pyrogram_handlers.generate_reply", new_callable=AsyncMock) as mock_gen, \
+             patch("handlers.pyrogram_handlers.generate_reply", new_callable=AsyncMock, side_effect=_gen_side_effect) as mock_gen, \
              patch("handlers.pyrogram_handlers.get_user", new_callable=AsyncMock, return_value={"language_code": "en", "settings": {}}), \
              patch("handlers.pyrogram_handlers.get_system_message", new_callable=AsyncMock, return_value=TYPING_TEXT), \
-             patch("handlers.pyrogram_handlers._regenerate_reply", new_callable=AsyncMock), \
-             patch("handlers.pyrogram_handlers.asyncio.create_task", side_effect=_close_coroutine_task) as mock_create_task:
+             patch("handlers.pyrogram_handlers.asyncio.create_task", side_effect=_close_coroutine_task):
             mock_pc.read_chat_history = AsyncMock(return_value=[
                 {"role": "other", "text": "Hello"}
             ])
             mock_pc.set_draft = AsyncMock(return_value=True)
             mock_pc.get_draft = AsyncMock(return_value=None)
             mock_pc.get_chat_bio = AsyncMock(return_value=None)
-            mock_gen.return_value = "Hi there!"
 
             await on_pyrogram_message(123, MagicMock(), message)
 
-        # generate_reply был вызван (первое сообщение обработано)
-        mock_gen.assert_called_once()
-        # create_task вызван 2 раза: _verify_draft_delivery + _regenerate_reply
-        assert mock_create_task.call_count == 2
+        # generate_reply вызван 2 раза: первый раз + перегенерация из-за pending
+        assert mock_gen.call_count == 2
         # Лок снят после завершения
         assert (123, 456) not in _reply_locks
         assert (123, 456) not in _reply_pending
 
     @pytest.mark.asyncio
     async def test_no_regeneration_without_pending(self):
-        """Без pending-флага _regenerate_reply не вызывается."""
+        """Без pending-флага generate_reply вызывается ровно 1 раз."""
         message = MagicMock()
         message.text = "Hello"
         message.outgoing = False
@@ -757,7 +762,7 @@ class TestOnPyrogramMessage:
             await on_pyrogram_message(123, MagicMock(), message)
 
         mock_gen.assert_called_once()
-        # create_task вызван только для _verify_draft_delivery (без _regenerate_reply)
+        # create_task вызван только для _verify_draft_delivery (без перегенерации)
         assert mock_create_task.call_count == 1
         assert (123, 456) not in _reply_locks
         assert (123, 456) not in _reply_pending
@@ -1828,24 +1833,4 @@ class TestDefaultProModelRuntime:
         call_kwargs = mock_gen.call_args.kwargs
         assert "model" in call_kwargs, "Empty settings should use PRO model by default"
 
-    @pytest.mark.asyncio
-    async def test_regenerate_reply_uses_pro_model_by_default(self):
-        """_regenerate_reply → settings={} → generate_reply с PRO-моделью."""
-        with patch("handlers.pyrogram_handlers.pyrogram_client") as mock_pc, \
-             patch("handlers.pyrogram_handlers.generate_reply", new_callable=AsyncMock) as mock_gen, \
-             patch("handlers.pyrogram_handlers.get_user", new_callable=AsyncMock, return_value={"language_code": "en", "settings": {}}), \
-             patch("handlers.pyrogram_handlers.get_system_message", new_callable=AsyncMock, return_value=TYPING_TEXT), \
-             patch("handlers.pyrogram_handlers.asyncio.create_task", side_effect=_close_coroutine_task), \
-             patch("utils.utils.DEFAULT_PRO_MODEL", True):
-            mock_pc.read_chat_history = AsyncMock(return_value=[
-                {"role": "other", "text": "Hello", "name": "Test"},
-            ])
-            mock_pc.set_draft = AsyncMock(return_value=True)
-            mock_pc.get_draft = AsyncMock(return_value=None)
-            mock_pc.get_chat_bio = AsyncMock(return_value=None)
-            mock_gen.return_value = "Hi there!"
 
-            await _regenerate_reply(123, 456)
-
-        call_kwargs = mock_gen.call_args.kwargs
-        assert "model" in call_kwargs, "Regeneration should use PRO model by default"

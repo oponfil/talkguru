@@ -11,7 +11,7 @@ from telegram.ext import ContextTypes
 from config import (
     DEBUG_PRINT,
     DRAFT_PROBE_DELAY, DRAFT_VERIFY_DELAY, DEFAULT_STYLE, STYLE_TO_EMOJI, STICKER_FALLBACK_EMOJI,
-    EMOJI_TO_STYLE, IGNORED_CHAT_IDS,
+    EMOJI_TO_STYLE, IGNORED_CHAT_IDS, MAX_REGENERATIONS,
 )
 from utils.utils import (
     format_chat_history,
@@ -231,13 +231,16 @@ async def _is_user_typing(user_id: int, chat_id: int) -> bool:
     """Проверяет, печатает ли пользователь (есть не-бот-черновик)."""
     key = (user_id, chat_id)
     existing = await pyrogram_client.get_draft(user_id, chat_id)
-    if existing and existing.strip() and _bot_drafts.get(key) != existing:
-        if DEBUG_PRINT:
-            print(
-                f"{get_timestamp()} [PYROGRAM] User is typing in chat {chat_id}, "
-                f"skipping generation for user {user_id}"
-            )
-        return True
+    if existing and existing.strip():
+        bot_draft = _bot_drafts.get(key)
+        bot_echo = _bot_draft_echoes.get(key)
+        if existing != bot_draft and existing != bot_echo:
+            if DEBUG_PRINT:
+                print(
+                    f"{get_timestamp()} [PYROGRAM] User is typing in chat {chat_id}, "
+                    f"skipping generation for user {user_id}"
+                )
+            return True
     return False
 
 async def on_pyrogram_message(user_id: int, pyrogram_client_instance, message) -> None:
@@ -338,12 +341,6 @@ async def on_pyrogram_message(user_id: int, pyrogram_client_instance, message) -
     # Лок: если уже генерируем ответ для этого чата — ставим флаг и уходим.
     # Когда текущая генерация закончится, она увидит флаг и перегенерирует.
     _cancel_auto_reply(key)
-    _bot_drafts.pop(key, None)
-
-    # Если пользователь сейчас печатает — не трогаем чат.
-    # Генерация запустится позже через on_pyrogram_draft, когда пользователь уйдёт.
-    if await _is_user_typing(user_id, chat_id):
-        return
 
     if _reply_locks.get(key):
         _reply_pending[key] = True
@@ -351,15 +348,16 @@ async def on_pyrogram_message(user_id: int, pyrogram_client_instance, message) -
             print(f"{get_timestamp()} [PYROGRAM] Reply locked for user {user_id} in chat {chat_id}, queued")
         return
 
+    # Если пользователь сейчас печатает — не трогаем чат.
+    # Генерация запустится позже через on_pyrogram_draft, когда пользователь уйдёт.
+    if await _is_user_typing(user_id, chat_id):
+        return
+
+    _bot_drafts.pop(key, None)
+
     _reply_locks[key] = True
     draft_replaced = False
     try:
-        # Читаем историю чата СНАЧАЛА, до установки черновика!
-        # Если пользователь удалил чат с нашей стороны, история будет пуста.
-        history = await pyrogram_client.read_chat_history(user_id, chat_id)
-        if not history:
-            return
-
         async def _clear_probe_draft() -> None:
             if draft_replaced:
                 return
@@ -374,10 +372,10 @@ async def on_pyrogram_message(user_id: int, pyrogram_client_instance, message) -
         style = get_effective_style(user_settings, chat_id)
         style_emoji = STYLE_TO_EMOJI.get(style, "🦉")
         probe_text = (await get_system_message(lang, "draft_typing")).format(emoji=style_emoji)
+        _bot_drafts[key] = probe_text
         _bot_draft_echoes[key] = probe_text
         await pyrogram_client.set_draft(user_id, chat_id, probe_text)
 
-        # Информация об участниках для контекста AI
         opponent = message.from_user
         opponent_info = {
             "first_name": opponent.first_name,
@@ -389,41 +387,16 @@ async def on_pyrogram_message(user_id: int, pyrogram_client_instance, message) -
             "phone_number": opponent.phone_number,
         } if opponent else None
 
-        # Генерируем ответ
-        kwargs: dict = {}
-        style = get_effective_style(user_settings, chat_id)
-        model = get_effective_model(user_settings, style)
-        if model:
-            kwargs["model"] = model
-        custom_prompt = get_effective_prompt(user_settings, chat_id)
-        tz_offset = user_settings.get("tz_offset", 0) or 0
-        reply_text = await generate_reply(history, user, opponent_info, custom_prompt=custom_prompt, style=style, tz_offset=tz_offset, **kwargs)
-        if not reply_text or not reply_text.strip():
-            await _clear_probe_draft()
-            return
-
-        # Устанавливаем черновик с AI-ответом
-        ai_text = reply_text.strip()
-        _bot_drafts[key] = ai_text
-        _bot_draft_echoes[key] = ai_text
-        await pyrogram_client.set_draft(user_id, chat_id, ai_text)
-        _track_replied_chat(user_id, chat_id)
-        draft_replaced = True
-
-        print(f"{get_timestamp()} [PYROGRAM] Reply set as draft for user {user_id} in chat {chat_id}")
-        dash_stats.record_draft(style)
-        asyncio.create_task(_verify_draft_delivery(user_id, chat_id, ai_text))
-
-        # Запускаем таймер автоответа
-        _maybe_schedule_auto_reply(user_settings, user_id, chat_id, ai_text)
+        draft_replaced = await _run_generation_loop(
+            user_id, chat_id, user, user_settings, style, opponent_info, _clear_probe_draft,
+        )
 
     except Exception as e:
         print(f"{get_timestamp()} [PYROGRAM] ERROR processing message for user {user_id}: {e}")
         await _clear_probe_draft()
     finally:
         _reply_locks.pop(key, None)
-        if _reply_pending.pop(key, None):
-            asyncio.create_task(_regenerate_reply(user_id, chat_id))
+        _reply_pending.pop(key, None)
 
 async def _extract_opponent_from_history(
     history: list[dict], user_id: int, chat_id: int,
@@ -441,6 +414,74 @@ async def _extract_opponent_from_history(
     return None
 
 
+async def _run_generation_loop(
+    user_id: int, chat_id: int,
+    user: dict | None, user_settings: dict, style: str,
+    opponent_info: dict | None,
+    clear_probe: "asyncio.coroutines" = None,
+) -> bool:
+    """Цикл генерации с перегенерацией при поступлении новых сообщений.
+
+    Возвращает True, если черновик с AI-ответом был установлен.
+    Используется как в on_pyrogram_message, так и в _generate_reply_for_chat.
+    """
+    key = (user_id, chat_id)
+
+    for iteration in range(MAX_REGENERATIONS):
+        _reply_pending.pop(key, None)
+
+        history = await pyrogram_client.read_chat_history(user_id, chat_id)
+        if not history:
+            if clear_probe:
+                await clear_probe()
+            return False
+
+        # Для emoji-шорткатов opponent_info берётся из истории
+        effective_opponent = opponent_info
+        if effective_opponent is None:
+            effective_opponent = await _extract_opponent_from_history(history, user_id, chat_id)
+
+        kwargs: dict = {}
+        model = get_effective_model(user_settings, style)
+        if model:
+            kwargs["model"] = model
+        custom_prompt = get_effective_prompt(user_settings, chat_id)
+        tz_offset = user_settings.get("tz_offset", 0) or 0
+        reply_text = await generate_reply(
+            history, user, effective_opponent,
+            custom_prompt=custom_prompt, style=style, tz_offset=tz_offset,
+            **kwargs,
+        )
+
+        # Проверяем, не пришло ли новое сообщение за время генерации
+        if _reply_pending.get(key) and iteration < MAX_REGENERATIONS - 1:
+            print(
+                f"{get_timestamp()} [PYROGRAM] New message arrived! Regenerating draft "
+                f"(iteration {iteration + 2}/{MAX_REGENERATIONS}) for user {user_id} in chat {chat_id}..."
+            )
+            continue
+
+        if not reply_text or not reply_text.strip():
+            if clear_probe:
+                await clear_probe()
+            return False
+
+        ai_text = reply_text.strip()
+        _bot_drafts[key] = ai_text
+        _bot_draft_echoes[key] = ai_text
+        await pyrogram_client.set_draft(user_id, chat_id, ai_text)
+        _track_replied_chat(user_id, chat_id)
+
+        print(f"{get_timestamp()} [DRAFT] Reply set as draft for user {user_id} in chat {chat_id}")
+        dash_stats.record_draft(style)
+        asyncio.create_task(_verify_draft_delivery(user_id, chat_id, ai_text))
+
+        _maybe_schedule_auto_reply(user_settings, user_id, chat_id, ai_text)
+        return True
+
+    return False
+
+
 async def _generate_reply_for_chat(
     user_id: int, chat_id: int,
     user: dict | None, user_settings: dict, lang: str | None,
@@ -450,13 +491,13 @@ async def _generate_reply_for_chat(
     Предполагает, что draft_typing проба уже установлена.
     """
     key = (user_id, chat_id)
-    draft_replaced = False
 
     if _reply_locks.get(key):
         _reply_pending[key] = True
         return
 
     _reply_locks[key] = True
+    draft_replaced = False
     try:
         async def _clear_probe_draft() -> None:
             """Убирает probe-черновик, если финальный ответ так и не был установлен."""
@@ -466,41 +507,11 @@ async def _generate_reply_for_chat(
             _bot_draft_echoes.pop(key, None)
             await pyrogram_client.set_draft(user_id, chat_id, "")
 
-        history = await pyrogram_client.read_chat_history(user_id, chat_id)
-        if not history:
-            await _clear_probe_draft()
-            return
-
-        opponent_info = await _extract_opponent_from_history(history, user_id, chat_id)
-
-        kwargs: dict = {}
         style = get_effective_style(user_settings, chat_id)
-        model = get_effective_model(user_settings, style)
-        if model:
-            kwargs["model"] = model
-        custom_prompt = get_effective_prompt(user_settings, chat_id)
-        tz_offset = user_settings.get("tz_offset", 0) or 0
-        reply_text = await generate_reply(
-            history, user, opponent_info,
-            custom_prompt=custom_prompt, style=style, tz_offset=tz_offset,
-            **kwargs,
+        draft_replaced = await _run_generation_loop(
+            user_id, chat_id, user, user_settings, style,
+            opponent_info=None, clear_probe=_clear_probe_draft,
         )
-        if not reply_text or not reply_text.strip():
-            await _clear_probe_draft()
-            return
-
-        ai_text = reply_text.strip()
-        _bot_drafts[key] = ai_text
-        _bot_draft_echoes[key] = ai_text
-        await pyrogram_client.set_draft(user_id, chat_id, ai_text)
-        _track_replied_chat(user_id, chat_id)
-        draft_replaced = True
-
-        print(f"{get_timestamp()} [DRAFT] Emoji reply set as draft for user {user_id} in chat {chat_id}")
-        dash_stats.record_draft(style)
-        asyncio.create_task(_verify_draft_delivery(user_id, chat_id, ai_text))
-
-        _maybe_schedule_auto_reply(user_settings, user_id, chat_id, ai_text)
 
     except Exception as e:
         print(f"{get_timestamp()} [PYROGRAM] ERROR _generate_reply_for_chat for user {user_id}: {e}")
@@ -510,83 +521,7 @@ async def _generate_reply_for_chat(
             await pyrogram_client.set_draft(user_id, chat_id, "")
     finally:
         _reply_locks.pop(key, None)
-        if _reply_pending.pop(key, None):
-            asyncio.create_task(_regenerate_reply(user_id, chat_id))
-
-
-async def _regenerate_reply(user_id: int, chat_id: int) -> None:
-    """Перегенерирует ответ на актуальной истории после снятия лока.
-
-    Вызывается когда во время генерации пришли новые сообщения.
-    Использует тот же лок для предотвращения параллельных вызовов.
-    """
-    key = (user_id, chat_id)
-
-    # Проверяем лок (на случай гонки)
-    if _reply_locks.get(key):
-        _reply_pending[key] = True
-        return
-
-    _reply_locks[key] = True
-    try:
-        user = await get_user(user_id)
-        user_settings = (user or {}).get("settings") or {}
-        lang = (user or {}).get("language_code")
-
-        # Если пользователь сейчас печатает — не трогаем чат
-        if await _is_user_typing(user_id, chat_id):
-            return
-
-        # Показываем пробу (и обновляем _bot_drafts, чтобы _verify_draft_delivery
-        # от предыдущего ответа не сделала ложный retry)
-        style = get_effective_style(user_settings, chat_id)
-        style_emoji = STYLE_TO_EMOJI.get(style, "🦉")
-        probe_text = (await get_system_message(lang, "draft_typing")).format(emoji=style_emoji)
-        _bot_drafts[key] = probe_text
-        _bot_draft_echoes[key] = probe_text
-        await pyrogram_client.set_draft(user_id, chat_id, probe_text)
-
-        # Читаем актуальную историю
-        history = await pyrogram_client.read_chat_history(user_id, chat_id)
-        if not history:
-            return
-
-        opponent_info = await _extract_opponent_from_history(history, user_id, chat_id)
-
-        # Генерируем ответ
-        kwargs: dict = {}
-        style = get_effective_style(user_settings, chat_id)
-        model = get_effective_model(user_settings, style)
-        if model:
-            kwargs["model"] = model
-        custom_prompt = get_effective_prompt(user_settings, chat_id)
-        tz_offset = user_settings.get("tz_offset", 0) or 0
-        reply_text = await generate_reply(
-            history, user, opponent_info,
-            custom_prompt=custom_prompt, style=style, tz_offset=tz_offset,
-            **kwargs,
-        )
-        if not reply_text or not reply_text.strip():
-            return
-
-        ai_text = reply_text.strip()
-        _bot_drafts[key] = ai_text
-        _bot_draft_echoes[key] = ai_text
-        await pyrogram_client.set_draft(user_id, chat_id, ai_text)
-        _track_replied_chat(user_id, chat_id)
-
-        print(f"{get_timestamp()} [PYROGRAM] Reply re-generated for user {user_id} in chat {chat_id}")
-        dash_stats.record_draft(style)
-        asyncio.create_task(_verify_draft_delivery(user_id, chat_id, ai_text))
-
-        _maybe_schedule_auto_reply(user_settings, user_id, chat_id, ai_text)
-
-    except Exception as e:
-        print(f"{get_timestamp()} [PYROGRAM] ERROR re-generating reply for user {user_id}: {e}")
-    finally:
-        _reply_locks.pop(key, None)
-        if _reply_pending.pop(key, None):
-            asyncio.create_task(_regenerate_reply(user_id, chat_id))
+        _reply_pending.pop(key, None)
 
 
 # Тексты черновиков, установленные ботом: {(user_id, chat_id): text}
@@ -773,6 +708,7 @@ async def on_pyrogram_draft(user_id: int, chat_id: int, draft_text: str) -> None
 
             # Пользователь вышел — показываем пробу и генерируем
             probe_text = (await get_system_message(lang, "draft_typing")).format(emoji=STYLE_TO_EMOJI.get(emoji_style, "🦉"))
+            _bot_drafts[key] = probe_text
             _bot_draft_echoes[key] = probe_text
             await pyrogram_client.set_draft(user_id, chat_id, probe_text)
             await _generate_reply_for_chat(user_id, chat_id, user, user_settings, lang)
@@ -794,6 +730,7 @@ async def on_pyrogram_draft(user_id: int, chat_id: int, draft_text: str) -> None
     style_emoji = STYLE_TO_EMOJI.get(style, "🦉")
     probe_text = (await get_system_message(lang, "draft_typing")).format(emoji=style_emoji)
     _pending_drafts[key] = instruction
+    _bot_drafts[key] = probe_text
     _bot_draft_echoes[key] = probe_text
     await pyrogram_client.set_draft(user_id, chat_id, probe_text)
 

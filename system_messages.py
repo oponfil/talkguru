@@ -106,7 +106,7 @@ SYSTEM_MESSAGES = {
     "auto_reply_ignore": "🔇 Ignore",
 
     # — Follow-up labels (base, without prefix) —
-    "follow_up_prefix": "🔄 Follow-up:",
+    "follow_up_prefix": "🔄 Auto-poke:",
     "follow_up_off": "✅ OFF",
     "follow_up_6h": "⚠️ 6 hours",
     "follow_up_24h": "⚠️ 24 hours",

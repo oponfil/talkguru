@@ -122,11 +122,13 @@ Per-chat settings override the global ones from `/settings`. If a per-chat value
 
 You can combine: `😈 tell her I miss her` — switches the style to Seducer and executes the instruction.
 
-### Voice Messages and Stickers
+### Voice Messages, Stickers, and Photos
 
 All voice messages in the chat history — from both sides (yours and the contact's) — are automatically transcribed via Telegram Premium `TranscribeAudio` and included in the AI context as text. Voice messages are transcribed sequentially to avoid Telegram rate limits; results are cached so repeated reads don't re-transcribe. If transcription fails (e.g. no Premium), the message is included as `[voice message]` so the AI still knows a voice was sent. Requires Telegram Premium on the connected account (or trial attempts for free users).
 
 Stickers are processed by emoji — the bot sees the sticker's emoji in the conversation context and generates an appropriate reply.
+
+**Photos** are automatically analyzed using the Vision capabilities of the Gemini 3.1 Flash Lite model. When someone sends a photo in a private chat, the bot securely fetches the image, generates a textual description of its contents, and injects it into the AI context as `[photo: description]`. This allows the AI to "see" the photo and generate highly contextual replies. The descriptions are cached in memory to speed up context generation. Original photo captions, if present, are also preserved and fed to the AI.
 
 ## Dashboard
 
